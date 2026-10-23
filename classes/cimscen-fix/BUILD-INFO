@@ -1,0 +1,5 @@
+label: cimscen-fix (our test driver harness/camel/cim/.../CimScenario.java, compiled against classes/cim-fix)
+javac: javac 21.0.12.1 --release 17 -g
+built: 2026-10-23T20:08:26Z
+sha256:
+  b75e825b9b06ce12d88114cea49208ee510dcc83e2da1824bf309ce9eecf7011  ./org/apache/camel/util/CimScenario.class

@@ -78,7 +78,17 @@ let () =
           | MRValue (Some VNull, _) -> "V null"
           | MRValue (Some (VFloat b), _) -> "F " ^ z_to_string (canon32 b)
           | MRValue (Some (VDouble b), _) -> "D " ^ z_to_string (canon64 b)
-          | MRValue (Some v, s) -> (match str_value s v with Some u -> String.trim ("S " ^ units_hex u) | None -> "V other")
+          | MRValue (Some v, s) -> (match str_value s v with Some u -> String.trim ("S " ^ units_hex u) | None ->
+              (* an object: its class and the length of each array-valued field *)
+              (match v with
+               | VRef l -> (match s.ms_heap l with
+                   | Some (OObj (c, fs)) ->
+                       let arr = List.filter_map (fun (f, fv) -> match fv with
+                           | VRef a -> (match s.ms_heap a with Some (OArr (_, es)) -> Some (Printf.sprintf "%s.length=%d" f (List.length es)) | _ -> None)
+                           | _ -> None) fs in
+                       String.concat " " (("O " ^ c) :: arr)
+                   | _ -> "V other")
+               | _ -> "V other"))
           | MRExc (e, s) -> "E " ^ exn_class s e
           | MRStuck w -> "STUCK " ^ w
           | MROutOfFuel -> "FUEL" in

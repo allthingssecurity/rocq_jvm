@@ -1,0 +1,4 @@
+label: cimscen-jdk: the two java.util model classes CaseInsensitiveMap needs (copied from classes/jdkmodel, see its BUILD-INFO and docs/jdk-collections-status.md)
+sha256:
+  26434cb3a5719a0c0d0b7c5aa87990cb62be3109e766480eb7e4b60a22e6e99b  ./java/util/AbstractMap.class
+  a32003d8df2d653276bb16e8581fd004c1d733e5dbbda6b2245b6cdf006a1f3b  ./java/util/Map.class

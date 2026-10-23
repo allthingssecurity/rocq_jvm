@@ -418,3 +418,53 @@ Proof.
   destruct (cf_super cf); [apply IH | reflexivity].
 Qed.
 End InternFacts.
+
+Section SpecialModel.
+Variable p : program.
+Variable mdl : model.
+
+(** invokespecial of a JDK constructor (e.g. Object.<init>) answered by a model. *)
+Lemma do_invoke_special_model : forall s top rest mr l more r nx o v s',
+  ms_heap s l = Some o ->
+  (match o with OLam _ _ _ _ _ => false | _ => true end) = true ->
+  resolve_full p (mr_class mr) (mr_name mr) (mr_desc mr) = None ->
+  first_unloaded p 64 (mr_class mr) = mr_class mr ->
+  mdl (mr_class mr) (mr_name mr) (mr_desc mr) (VRef l :: more) s = MOk v s' ->
+  let st' := match v with Some w => w :: r | None => r end in
+  (stack_slots st' <=? c_max_stack (cf_code top))%Z = true ->
+  do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
+    MNext (with_frames (with_frames s' (ms_frames s))
+             (set_frame top (mkframe nx st' (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest mr l more r nx o v s' Hh Ho Hr Hu Hm st' Hb.
+  assert (E : do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
+              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+                         p mdl s top rest InvSpecial mr l more (ms_heap s l) r nx) by reflexivity.
+  rewrite E, Hh. unfold invoke_obj. destruct o; try discriminate Ho;
+  rewrite Hr, Hu, Hm; unfold invoke_run_model; rewrite Hm; unfold invoke_frame_go; subst st'; rewrite Hb; reflexivity.
+Qed.
+End SpecialModel.
+
+Lemma returns_weaken : forall p mdl s v (P Q : mstate -> Prop),
+  returns p mdl s v P -> (forall s', P s' -> Q s') -> returns p mdl s v Q.
+Proof. intros p mdl s v P Q (k & s' & H1 & H2) HPQ. exists k, s'. auto. Qed.
+
+Section ArraySteps.
+Variable p : program.
+Variable mdl : model.
+
+Lemma mstep_anewarray : forall s top rest cn nx n r,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Anewarray cn, nx) ->
+  f_stack (cf_frame top) = VInt n :: r ->
+  (n <? 0)%Z = false -> (MAX_ARRAY <? n)%Z = false ->
+  (stack_slots (VRef (ms_next s) :: r) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames (snd (alloc s (OArr (class_type cn) (repeat VNull (Z.to_nat n)))))
+             (set_frame top (mkframe nx (VRef (ms_next s) :: r) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest cn nx n r Hfr Hf Hst H1 H2 Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, H1, H2. cbn [alloc fst snd].
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+End ArraySteps.

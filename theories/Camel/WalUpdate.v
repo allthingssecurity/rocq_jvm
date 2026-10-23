@@ -275,6 +275,62 @@ Qed.
 Definition LOGK := "org/apache/camel/component/wal/TransactionLog.LOG"%string.
 Definition LOGC := "org/slf4j/Logger"%string.
 
+Definition FAILEDK := "org/apache/camel/component/wal/LogEntry$EntryState.FAILED"%string.
+
+Lemma failed_ne : forall u, FAILEDK <> intern_key (OStr u).
+Proof. intros u E. unfold FAILEDK, intern_key in E. discriminate E. Qed.
+Lemma log_ne : forall u, LOGK <> intern_key (OStr u).
+Proof. intros u E. unfold LOGK, intern_key in E. discriminate E. Qed.
+
+(** What a call leaves unchanged besides the heap: no address is reused, no class is
+    (de)initialised, the logger and FAILED constants stay. *)
+Definition env_same (s0 s' : mstate) : Prop :=
+  ms_next s0 <= ms_next s' /\ ms_inited s' = ms_inited s0 /\
+  (forall c, erroneous wp 64 (ms_statics s') c = erroneous wp 64 (ms_statics s0) c) /\
+  assoc LOGK (ms_statics s') = assoc LOGK (ms_statics s0) /\
+  assoc FAILEDK (ms_statics s') = assoc FAILEDK (ms_statics s0).
+
+Lemma env_same_proj : forall s s', ms_next s <= ms_next s' -> ms_inited s' = ms_inited s ->
+  ms_statics s' = ms_statics s -> env_same s s'.
+Proof.
+  intros s s' H1 H2 H3. unfold env_same. rewrite H2, H3.
+  refine (conj H1 (conj eq_refl (conj (fun c => eq_refl) (conj eq_refl eq_refl)))).
+Qed.
+
+Lemma env_same_intern : forall s s' u, ms_next s' = ms_next (snd (intern s (OStr u))) ->
+  ms_inited s' = ms_inited (snd (intern s (OStr u))) -> ms_statics s' = ms_statics (snd (intern s (OStr u))) ->
+  env_same s s'.
+Proof.
+  intros s s' u H1 H2 H3. unfold env_same. rewrite H1, H2, H3.
+  refine (conj (intern_next s _) (conj (intern_inited s _) (conj (fun c => erroneous_intern wp 64 s u c)
+    (conj (intern_statics s _ _ (log_ne u)) (intern_statics s _ _ (failed_ne u)))))).
+Qed.
+
+Lemma env_same_intern' : forall s0 s s' u,
+  ms_next s = ms_next s0 -> ms_inited s = ms_inited s0 -> ms_statics s = ms_statics s0 ->
+  ms_next s' = ms_next (snd (intern s (OStr u))) ->
+  ms_inited s' = ms_inited (snd (intern s (OStr u))) -> ms_statics s' = ms_statics (snd (intern s (OStr u))) ->
+  env_same s0 s'.
+Proof.
+  intros s0 s s' u A1 A2 A3 H1 H2 H3. pose proof (env_same_intern s s' u H1 H2 H3) as (B1 & B2 & B3 & B4 & B5).
+  unfold env_same. rewrite <- A1, <- A2, <- A3. exact (conj B1 (conj B2 (conj B3 (conj B4 B5)))).
+Qed.
+
+Ltac env_intern := match goal with |- env_same ?s0 ?s' =>
+  match s' with context [intern ?X (OStr ?u)] =>
+    apply (env_same_intern' s0 X s' u); reflexivity end end.
+
+Lemma env_same_trans : forall a b c, env_same a b -> env_same b c -> env_same a c.
+Proof.
+  intros a b c (A1 & A2 & A3 & A4 & A5) (B1 & B2 & B3 & B4 & B5). unfold env_same.
+  refine (conj _ (conj _ (conj _ (conj _ _)))).
+  - lia.
+  - rewrite B2. exact A2.
+  - intros x. rewrite B3. apply A3.
+  - rewrite B4. exact A4.
+  - rewrite B5. exact A5.
+Qed.
+
 Lemma rf_debug : resolve_full wp LOGC "debug" "(Ljava/lang/String;Ljava/lang/Object;)V" = None. Proof. vm_compute. reflexivity. Qed.
 Lemma rf_warn : resolve_full wp LOGC "warn" "(Ljava/lang/String;)V" = None. Proof. vm_compute. reflexivity. Qed.
 Lemma rf_isdebug : resolve_full wp LOGC "isDebugEnabled" "()Z" = None. Proof. vm_compute. reflexivity. Qed.
@@ -323,7 +379,7 @@ Theorem update_live : forall s0 t li stv cap arr cI cL eI eL b lg es c x pos le 
   t < ms_next s0 -> li < ms_next s0 -> lg < ms_next s0 -> arr < ms_next s0 -> c < ms_next s0 -> le < ms_next s0 ->
   returns wp mdl s0 (Some (VRef c))
     (fun s' => ms_heap s' le = Some (OObj LE (le_fields stv km k vm vv)) /\
-               forall y, y < ms_next s0 -> y <> le -> ms_heap s' y = ms_heap s0 y).
+               (forall y, y < ms_next s0 -> y <> le -> ms_heap s' y = ms_heap s0 y) /\ env_same s0 s').
 Proof.
   intros s0 t li stv cap arr cI cL eI eL b lg es c x pos le st0 km k vm vv
          Hfr Ht Hli Hstv He Hi HLOG Hlg Hcu Harr HeI Hes Hc Hle Ht' Hli' Hlg' Harr' Hc' Hle'.
@@ -381,12 +437,13 @@ Proof.
   lstep.
   eapply returns_now.
   { eapply mstep_local_return; [ reflexivity | reflexivity | reflexivity | reflexivity | cbn; reflexivity ]. }
-  cbn [with_frames ms_heap ms_next]. split.
+  cbn [with_frames ms_heap ms_next]. split; [|split].
   - apply upd_same.
   - intros y Hy Hne. rewrite upd_other by exact Hne. apply Hold. exact Hy.
+  - subst I. env_intern.
 Qed.
 
-Definition FAILEDK := "org/apache/camel/component/wal/LogEntry$EntryState.FAILED"%string.
+
 
 (** The tail of [update] from pc 84 (after the record was found rolled over):
     compare the state with FAILED, maybe log a warning, return null. *)
@@ -403,7 +460,7 @@ Lemma from84 : forall S t li stv h0 n0 lg vf,
   erroneous wp 64 (ms_statics S) TL = false ->
   init_needed wp 64 (ms_inited S) TL = None ->
   h0 lg = Some (OObj LOGC nil) -> lg < n0 ->
-  returns wp mdl S (Some VNull) (fun s' => forall y, y < n0 -> ms_heap s' y = h0 y).
+  returns wp mdl S (Some VNull) (fun s' => (forall y, y < n0 -> ms_heap s' y = h0 y) /\ env_same S s').
 Proof.
   intros S t li stv h0 n0 lg vf Hfr Hstv Hvf Hold Hn He Hi HF HLOG He' Hi' Hlg Hlg'.
   assert (Hc2 : cat2 stv = false) by (destruct stv; try discriminate Hstv; reflexivity).
@@ -434,18 +491,13 @@ Proof.
     lstep.
     eapply returns_now.
     { eapply mstep_local_return; [ reflexivity | reflexivity | reflexivity | reflexivity | cbn; reflexivity ]. }
-    cbn [with_frames ms_heap]. exact Hold'.
+    cbn [with_frames ms_heap]. split; [exact Hold' | subst I; env_intern].
   - lstep.
     lstep.
     eapply returns_now.
     { eapply mstep_local_return; [ reflexivity | reflexivity | reflexivity | reflexivity | cbn; reflexivity ]. }
-    cbn [with_frames ms_heap]. exact Hold.
+    cbn [with_frames ms_heap]. split; [exact Hold | apply env_same_proj; cbn; [lia | reflexivity | reflexivity]].
 Qed.
-
-Lemma failed_ne : forall u, FAILEDK <> intern_key (OStr u).
-Proof. intros u E. unfold FAILEDK, intern_key in E. discriminate E. Qed.
-Lemma log_ne : forall u, LOGK <> intern_key (OStr u).
-Proof. intros u E. unfold LOGK, intern_key in E. discriminate E. Qed.
 
 Theorem update_dead : forall s0 t li stv cap arr cI cL eI eL b lg vf,
   ms_frames s0 = [upd_frame t li stv] ->
@@ -462,7 +514,8 @@ Theorem update_dead : forall s0 t li stv cap arr cI cL eI eL b lg vf,
   ms_heap s0 lg = Some (OObj LOGC nil) ->
   cu4_val cL cI eL eI = 0 ->
   t < ms_next s0 -> li < ms_next s0 -> lg < ms_next s0 ->
-  returns wp mdl s0 (Some VNull) (fun s' => forall y, y < ms_next s0 -> ms_heap s' y = ms_heap s0 y).
+  returns wp mdl s0 (Some VNull)
+    (fun s' => (forall y, y < ms_next s0 -> ms_heap s' y = ms_heap s0 y) /\ env_same s0 s').
 Proof.
   intros s0 t li stv cap arr cI cL eI eL b lg vf Hfr Ht Hli Hstv Hvf He Hi He2 Hi2 HLOG HF Hlg Hcu Ht' Hli' Hlg'.
   destruct s0 as [h0 n0 sts0 ini0 lk0 fs0];
@@ -497,20 +550,26 @@ Proof.
       erewrite do_invoke_unloaded_model;
         [ reflexivity | right; reflexivity | cbn; subst I; rewrite intern_old by (cbn; lia); exact Hlg
         | exact rf_debug | exact fu_log | unfold mdl; apply m_debug | reflexivity ]. }
-    eapply (from84 _ t li stv h0 n0 lg vf); [ reflexivity | exact Hstv | exact Hvf | | | | | | | | | exact Hlg | exact Hlg' ];
-      cbn [with_frames ms_heap ms_next ms_statics ms_inited]; subst I.
-    + intros y Hy. rewrite intern_old by (cbn; lia). reflexivity.
-    + eapply Z.le_trans; [ | apply intern_next ]. cbn. lia.
-    + rewrite erroneous_intern. exact He2.
-    + rewrite intern_inited. exact Hi2.
-    + rewrite intern_statics by apply failed_ne. exact HF.
-    + rewrite intern_statics by apply log_ne. exact HLOG.
-    + rewrite erroneous_intern. exact He.
-    + rewrite intern_inited. exact Hi.
+    eapply returns_weaken.
+    { eapply (from84 _ t li stv h0 n0 lg vf); [ reflexivity | exact Hstv | exact Hvf | | | | | | | | | exact Hlg | exact Hlg' ];
+        cbn [with_frames ms_heap ms_next ms_statics ms_inited]; subst I.
+      + intros y Hy. rewrite intern_old by (cbn; lia). reflexivity.
+      + eapply Z.le_trans; [ | apply intern_next ]. cbn. lia.
+      + rewrite erroneous_intern. exact He2.
+      + rewrite intern_inited. exact Hi2.
+      + rewrite intern_statics by apply failed_ne. exact HF.
+      + rewrite intern_statics by apply log_ne. exact HLOG.
+      + rewrite erroneous_intern. exact He.
+      + rewrite intern_inited. exact Hi. }
+    intros s' [H1 H2]. split; [exact H1|]. eapply env_same_trans; [ | exact H2 ].
+    subst I. env_intern.
   - (* debug disabled *)
     lstep.
-    eapply (from84 _ t li stv h0 n0 lg vf); [ reflexivity | exact Hstv | exact Hvf | intros y Hy; reflexivity
-      | cbn; lia | exact He2 | exact Hi2 | exact HF | exact HLOG | exact He | exact Hi | exact Hlg | exact Hlg' ].
+    eapply returns_weaken.
+    { eapply (from84 _ t li stv h0 n0 lg vf); [ reflexivity | exact Hstv | exact Hvf | intros y Hy; reflexivity
+      | cbn; lia | exact He2 | exact Hi2 | exact HF | exact HLOG | exact He | exact Hi | exact Hlg | exact Hlg' ]. }
+    intros s' [H1 H2]. split; [exact H1|]. eapply env_same_trans; [ | exact H2 ].
+    apply env_same_proj; [apply Z.le_refl | reflexivity | reflexivity].
 Qed.
 
 End Proofs.

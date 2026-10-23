@@ -82,9 +82,10 @@ Theorem update_contract : forall s0 t li stv cap n k arr b lg vf,
     exists c le km kk vm vv,
       returns wp (mdl e) s0 (Some (VRef c))
         (fun s' => ms_heap s' le = Some (OObj LE (le_fields stv km kk vm vv)) /\
-                   forall y, y < ms_next s0 -> y <> le -> ms_heap s' y = ms_heap s0 y)
+                   (forall y, y < ms_next s0 -> y <> le -> ms_heap s' y = ms_heap s0 y) /\ env_same s0 s')
   else
-    returns wp (mdl e) s0 (Some VNull) (fun s' => forall y, y < ms_next s0 -> ms_heap s' y = ms_heap s0 y).
+    returns wp (mdl e) s0 (Some VNull)
+      (fun s' => (forall y, y < ms_next s0 -> ms_heap s' y = ms_heap s0 y) /\ env_same s0 s').
 Proof.
   intros s0 t li stv cap n k arr b lg vf Hr Hfr Ht Hli Hstv Hvf He Hi He2 Hi2 HLOG HF Hlg Ht' Hli' Hlg' Hslot.
   pose proof (cu4_live cap n k Hr) as Hcu.
