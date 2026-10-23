@@ -370,4 +370,131 @@ Proof.
   eapply (fi_loop (S (length ks)) s c rest nx m q qu hsh fs_ kA ks cA cn r v P); try eassumption; reflexivity.
 Qed.
 
+(** ** findIndex(String key): hash, then the same chain walk *)
+Definition fi1_desc := "(Ljava/lang/String;)I"%string.
+Definition fi1_code := ltac:(let x := eval vm_compute in (code_of CIM "findIndex" fi1_desc) in exact x).
+Definition fi1_m := mk_m "findIndex" fi1_desc fi_acc fi1_code.
+Lemma rf_fi1 : resolve_full cp CIM "findIndex" fi1_desc = Some (CIM, fi1_m). Proof. vm_compute. reflexivity. Qed.
+
+Definition f1frame (pc : Z) (stk lv : list value) : cframe :=
+  {| cf_class := CIM; cf_method := fi1_m; cf_code := fi1_code; cf_rt := Some TInt;
+     cf_frame := mkframe pc stk lv; cf_resume := None; cf_clinit := false |}.
+Definition f1s (s : mstate) (rest : list cframe) (pc : Z) (stk lv : list value) : mstate :=
+  with_frames s (f1frame pc stk lv :: rest).
+Lemma f1s_local : forall s rest pc stk lv pc' stk' lv',
+  with_frames (f1s s rest pc stk lv) (set_frame (f1frame pc stk lv) (mkframe pc' stk' lv') :: rest) = f1s s rest pc' stk' lv'.
+Proof. reflexivity. Qed.
+Lemma f1s_model : forall s rest pc stk lv pc' stk' lv',
+  with_frames (with_frames (f1s s rest pc stk lv) (ms_frames (f1s s rest pc stk lv)))
+    (set_frame (f1frame pc stk lv) (mkframe pc' stk' lv') :: rest) = f1s s rest pc' stk' lv'.
+Proof. reflexivity. Qed.
+Ltac nrm ::= rewrite ?hs_local, ?hs_model, ?fs_local, ?fs_model, ?f1s_local, ?f1s_model.
+Ltac hp ::= cbn [ms_heap fs hs f1s with_frames]; eassumption.
+
+Lemma fi1_loop : forall f s c rs nx m q qu fs_ kA ks cA cn r v P,
+  ms_heap s m = Some (OObj CIM fs_) ->
+  assoc "keys" fs_ = Some (VRef kA) -> assoc "chainNext" fs_ = Some (VRef cA) ->
+  ms_heap s kA = Some (OArr (TRef STR) ks) -> ms_heap s cA = Some (OArr TInt cn) ->
+  ms_heap s q = Some (OStr qu) -> cf_resume c = Some nx ->
+  forall idx, fi_walk (ms_heap s) ks cn qu idx f = Some r ->
+  returns cp mdl (iret s c rs r) v P ->
+  returns cp mdl (f1s s (c :: rs) 18 [] [VRef m; VRef q; VInt idx]) v P.
+Proof.
+  induction f as [|f IH]; intros s c rs nx m q qu fs_ kA ks cA cn r v P Hm Hk Hc HkA HcA Hq Hr idx Hw HR;
+    [discriminate|].
+  cbn [fi_walk] in Hw.
+  destruct (Z.eqb_spec idx (-1)) as [E|E].
+  - injection Hw as <-. subst idx.
+    lstep. lstep. lstep. lstep.
+    eapply returns_step.
+    { eapply mstep_return_to; [ reflexivity | reflexivity | reflexivity | reflexivity | cbn; reflexivity | exact Hr ]. }
+    unfold iret in HR. rewrite Hr in HR. exact HR.
+  - assert (E1 : (idx =? -1) = false) by (apply Z.eqb_neq; exact E).
+    destruct (nth_z ks idx) as [kv|] eqn:Ek; [|discriminate].
+    destruct kv as [z|z|z|z| |kl|]; try discriminate.
+    destruct (ms_heap s kl) as [[| | ku | | |]|] eqn:Ekl; try discriminate.
+    lstep. lstep. lstep.
+    lstep. GET. lstep.
+    eapply returns_step.
+    { eapply mstep_aaload; [ reflexivity | reflexivity | reflexivity | hp | reflexivity
+                           | eapply bounds_false; exact Ek | exact Ek | reflexivity ]. }
+    nrm. lstep.
+    eapply returns_step.
+    { erewrite mstep_invoke by reflexivity.
+      eapply do_invoke_string_model;
+        [ left; reflexivity | hp | exact rf_eic | exact fu_string
+        | unfold mdl; erewrite m_eic; [ reflexivity | hp | hp ] | reflexivity ]. }
+    nrm.
+    destruct (equals_ignore_case (j_u e) ku qu) eqn:Eq.
+    + injection Hw as <-.
+      lstep. lstep.
+      eapply returns_step.
+      { eapply mstep_return_to; [ reflexivity | reflexivity | reflexivity | reflexivity | cbn; reflexivity | exact Hr ]. }
+      unfold iret in HR. rewrite Hr in HR. exact HR.
+    + destruct (nth_z cn idx) as [[j|z|z|z| |z|]|] eqn:Ec; try discriminate.
+      lstep. lstep. GET. lstep.
+      eapply returns_step.
+      { eapply mstep_xaload; [ reflexivity | reflexivity | reflexivity | hp | reflexivity
+                             | eapply bounds_false; exact Ec | exact Ec | reflexivity ]. }
+      nrm. lstep. lstep.
+      eapply IH; eassumption.
+Qed.
+
+Definition fi1_mr : methodref := {| mr_class := CIM; mr_name := "findIndex"; mr_desc := fi1_desc; mr_interface := false |}.
+
+Lemma call_fi1 : forall s top rest nx m q qu rst fs_ tA tbl kA ks cA cn pw i0 r v P,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Invoke InvVirtual fi1_mr, nx) ->
+  f_stack (cf_frame top) = VRef q :: VRef m :: rst ->
+  ms_heap s m = Some (OObj CIM fs_) ->
+  assoc "table" fs_ = Some (VRef tA) -> assoc "keys" fs_ = Some (VRef kA) -> assoc "chainNext" fs_ = Some (VRef cA) ->
+  ms_heap s tA = Some (OArr TInt tbl) ->
+  ms_heap s kA = Some (OArr (TRef STR) ks) -> ms_heap s cA = Some (OArr TInt cn) ->
+  ms_heap s q = Some (OStr qu) -> slen qu <= INT_MAX ->
+  erroneous cp 64 (ms_statics s) CIM = false -> init_needed cp 64 (ms_inited s) CIM = None ->
+  Z.of_nat (length tbl) = 2 ^ pw -> 0 <= pw <= 30 ->
+  nth_z tbl (cih_spec qu mod 2 ^ pw) = Some (VInt i0) ->
+  fi_walk (ms_heap s) ks cn qu i0 (S (length ks)) = Some r ->
+  returns cp mdl (with_frames s (set_resume (set_frame top (mkframe nx (VInt r :: rst) (f_locals (cf_frame top)))) None :: rest)) v P ->
+  returns cp mdl s v P.
+Proof.
+  intros s top rest nx m q qu rst fs_ tA tbl kA ks cA cn pw i0 r v P Hfr Hf Hst Hm Ht Hk Hc HtA HkA HcA Hq Hmax He Hi Hlen Hpw Hb Hw HR.
+  assert (Hp2 : 1 <= 2 ^ pw <= 2 ^ 30) by (split; [assert (0 < 2 ^ pw) by (apply Z.pow_pos_nonneg; lia); lia | apply Z.pow_le_mono_r; lia]).
+  set (c := set_resume (set_frame top (mkframe (f_pc (cf_frame top)) rst (f_locals (cf_frame top)))) (Some nx)).
+  eapply returns_step.
+  { erewrite mstep_invoke; [ | exact Hfr | exact Hf | reflexivity | rewrite Hst; reflexivity ].
+    cbn [app]. erewrite do_invoke_obj_enter; [ | left; reflexivity | exact Hm | exact rf_fi1 | reflexivity ].
+    unfold enter. cbn -[set_resume set_frame]. reflexivity. }
+  change (returns cp mdl (f1s s (c :: rest) 0 [] [VRef m; VRef q; VTop]) v P).
+  lstep. GET. lstep.
+  eapply returns_step.
+  { erewrite mstep_invoke; [ | reflexivity | reflexivity | reflexivity | reflexivity ].
+    cbn [app]. erewrite do_invoke_static_enter; [ | exact He | exact Hi | exact rf_cih | reflexivity ].
+    unfold enter. cbn -[set_resume set_frame f1frame]. reflexivity. }
+  match goal with |- returns _ _ (with_frames _ (_ :: ?cc :: _)) _ _ => set (c2 := cc) end.
+  change (returns cp mdl (hs s (c2 :: c :: rest) 0 [] [VRef q; VTop; VTop; VTop; VTop]) v P).
+  lstep. lstep. lstep. lstep. lstep.
+  vstep m_length.
+  lstep.
+  refine (loop s c2 (c :: rest) q qu 8 v P Hq Hmax eq_refl _ (Z.to_nat (slen qu - 0)) 0 VTop _ _); [ | lia | unfold slen; lia ].
+  unfold hret. cbn [cf_resume set_resume set_frame cf_frame f_stack f_locals].
+  change (returns cp mdl (f1s s (c :: rest) 8 [VInt (cih_spec qu); VRef tA] [VRef m; VRef q; VTop]) v P).
+  lstep. GET.
+  eapply returns_step.
+  { eapply mstep_arraylength; [ reflexivity | reflexivity | reflexivity | hp | reflexivity ]. }
+  nrm. lstep. lstep. lstep.
+  assert (Hw2 : wrap 32 (2 ^ pw - 1) = Z.ones pw)
+    by (rewrite Z.ones_equiv; apply wrap_id; [lia | unfold in_range in *; cbn; lia]).
+  assert (Hmod : 0 <= cih_spec qu mod 2 ^ pw < 2 ^ pw) by (apply Z.mod_pos_bound; lia).
+  match goal with |- context [VInt ?X :: VRef tA :: _] =>
+    assert (Hx : X = cih_spec qu mod 2 ^ pw) by
+      (rewrite Hw2, Z.land_ones by lia; apply wrap_id; [lia | unfold in_range in *; cbn; lia]) end.
+  rewrite Hx.
+  eapply returns_step.
+  { eapply mstep_xaload; [ reflexivity | reflexivity | reflexivity | hp | reflexivity
+                         | eapply bounds_false; exact Hb | exact Hb | reflexivity ]. }
+  nrm. lstep.
+  eapply (fi1_loop (S (length ks)) s c rest nx m q qu fs_ kA ks cA cn r v P); try eassumption; reflexivity.
+Qed.
+
 End Calls.

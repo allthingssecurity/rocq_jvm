@@ -537,4 +537,17 @@ Proof.
   unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh.
   cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
+Lemma mstep_checkcast_ref : forall s top rest nx cn l r o,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Checkcast cn, nx) ->
+  f_stack (cf_frame top) = VRef l :: r ->
+  ms_heap s l = Some o ->
+  assignable p 64 (runtime_type o) cn = Some true ->
+  (stack_slots (VRef l :: r) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (VRef l :: r) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest nx cn l r o Hfr Hf Hst Hh Ha Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Ha.
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite <- Hst. rewrite Hst at 1. rewrite Hb. reflexivity.
+Qed.
 End ArraySteps.
