@@ -6,7 +6,7 @@ list is checked by the Rocq kernel.
 ## 1. Rocq
 - The Rocq 9.3.0 kernel and `rocqchk`. The Rocq standard library (rocq-stdlib 9.2.0) is used only
   through definitions and proved lemmas. The development declares **no `Axiom`s and uses no
-  `Admitted`** (Phase 1 files; Track C files list their own in `docs/track-c-status.md`).
+  `Admitted`** (this holds for every file in `_RocqProject`, including the Track C files under `theories/Concurrency/`).
   Check: `Print Assumptions WalCanUpdate.fix_correct.` prints "Closed under the global context".
 - `vm_compute` (the bytecode VM used for kernel conversion) is used to evaluate the class-file parser
   on the bytes and for the concrete counterexamples. It is part of the standard kernel TCB; for a
@@ -69,6 +69,15 @@ source of java.base and checked against HotSpot by the corpora `harness/corpus3`
 Not modelled on purpose: `Object.hashCode`/`identityHashCode` (nondeterministic), I/O, threads, reflection.
 
 ## 6. Test drivers and assumptions stated in theorems
-- `harness/camel/wal-*/WalScenario.java` is our test driver for the whole-class camel-wal theorems.
+- `harness/camel/wal-*/WalScenario.java` and `harness/camel/cim/.../CimScenario.java` are our test drivers for the
+  kernel-computed whole-class scenario theorems (`WalScenario.v`, `CimScenario.v`). The unbounded camel-wal theorems
+  (`WalRing.v`) use no driver: they quantify over the heap and over every sequence of calls.
+- `CimScenario.v` loads two java.util **model classes** of Track B (`AbstractMap`, `Map`; clean-room Java,
+  `docs/jdk-collections-status.md`), which are trusted like the Rocq JDK models of section 5 and tested the same way.
+  Its case mapping is a concrete table for ASCII and Latin-1 (`l1_uenv`), which agrees with JDK 21 on the characters
+  the scenarios use; the 2,000-run differential test of the same driver uses the full JDK 21 tables.
+- The camel-wal theorems take the JVM-level preconditions as hypotheses (`wal_env`): the classes are initialised and
+  not erroneous, `TransactionLog.LOG` holds a logger, `EntryState.FAILED` a reference; `add` gets a LogEntry object.
+  Class initialisation itself is covered by the scenario theorems, not by the unbounded ones.
 - The Unicode facts of `CimSpec.jdk_facts` and of `cih_inconsistent_supplementary` are hypotheses of the
   theorems, not axioms; `harness/check_unicode_facts.py` checks them against the JDK 21 tables.
