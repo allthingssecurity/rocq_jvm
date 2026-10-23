@@ -550,4 +550,19 @@ Proof.
   unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Ha.
   cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite <- Hst. rewrite Hst at 1. rewrite Hb. reflexivity.
 Qed.
+Lemma mstep_newarray : forall s top rest t e nx n r,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Newarray t, nx) ->
+  elem_of_atype t = Some e ->
+  f_stack (cf_frame top) = VInt n :: r ->
+  (n <? 0)%Z = false -> (MAX_ARRAY <? n)%Z = false ->
+  (stack_slots (VRef (ms_next s) :: r) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames (snd (alloc s (OArr e (repeat (default_of e) (Z.to_nat n)))))
+             (set_frame top (mkframe nx (VRef (ms_next s) :: r) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest t e nx n r Hfr Hf He Hst H1 H2 Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, He, H1, H2. cbn [alloc fst snd].
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
 End ArraySteps.

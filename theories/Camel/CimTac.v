@@ -26,7 +26,7 @@ Ltac hp := cbn [ms_heap ms_statics ms_inited];
   first [ eassumption | reflexivity ].
 
 Ltac GET := eapply returns_step;
-  [ eapply mstep_getfield; [ reflexivity | reflexivity | reflexivity | hp | reflexivity | reflexivity ] | try nz ].
+  [ eapply mstep_getfield; [ reflexivity | reflexivity | reflexivity | hp | first [ reflexivity | eassumption ] | reflexivity ] | try nz ].
 Ltac PUT := eapply returns_step;
   [ eapply mstep_putfield; [ reflexivity | reflexivity | reflexivity | reflexivity | reflexivity | hp
                            | reflexivity | reflexivity ] | try nz ].
