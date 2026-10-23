@@ -2,7 +2,7 @@
 
 Rocq 9.3.0 + rocq-stdlib 9.2.0. Build: `make` (uses `rocq makefile`, `-j1`; about 16 minutes, most of it the
 kernel-computed whole-class checks in `WalScenario.v` and `CimScenario.v`). Trust base: `TRUST.md`. Opcode table: `docs/opcode-coverage.md`.
-Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-24 (night 1, second half).
+Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-24, early morning.
 
 Every theorem listed below: `Print Assumptions` = "Closed under the global context" (no axioms, nothing admitted).
 
@@ -16,7 +16,7 @@ Every theorem listed below: `Print Assumptions` = "Closed under the global conte
 | class files: constant pool, fields, methods, Code, exception tables, BootstrapMethods, all 202 opcodes decoded, modified UTF-8 | `Loader/ClassFile.v` (in Rocq) | done |
 | machine: heap objects, arrays (all kinds, store checks), exceptions as objects + handler search across frames, all invoke kinds with resolution, virtual/interface dispatch, default methods, `<clinit>` (JVMS 5.5) incl. `ExceptionInInitializerError` / `NoClassDefFoundError`, checkcast/instanceof incl. arrays, monitors (single thread), String/Class constants (interned), `invokedynamic` for string concatenation and lambdas/method refs, multianewarray | `Core/Machine.v` | done |
 | JDK models: String, StringBuilder, Character (Unicode tables are parameters), Integer/Long/Math, boxing with the JLS caches, Objects, System.arraycopy, Arrays.fill/copyOf, array clone, Enum, slf4j loggers, exception constructors | `Jdk/Strings.v`, `Jdk/Jdk.v` | done for what the corpora use |
-| java.util collections (as Java model classes) | `harness/jdkmodel/` | in progress (Track B agent) |
+| java.util collections (as clean-room Java model classes, loaded by the machine) | `harness/jdkmodel/`, `classes/jdkmodel` | done for Iterator/ListIterator/Collection/List/Set/Map(+Entry) with defaults, AbstractCollection/List/Set/Map, ArrayList, HashMap (tree bins, JDK iteration order), LinkedHashMap (access order, removeEldestEntry), HashSet/LinkedHashSet, Collections empty/singleton/unmodifiable, Arrays.asList; 14 targets x 10,000 inputs, 0 mismatches; 5 canaries detected (`docs/jdk-collections-status.md`) |
 | threads / JMM | `Concurrency/Events.v`, `Order.v`, `Executions.v`, `DRF.v`, `Examples.v` | abstract event interface; executions, po/so/sw/hb/rf, well-formedness (JLS 17.4.7), hb-consistency (17.4.5), data races, SC; **DRF lemma proved** (a well-formed hb-consistent race-free execution is SC, `DRF.drf_execution_sc`), **DRF-SC for hb + acyclic(po∪so∪rf)** (`DRF.drf_sc_no_thin_air`), and the JLS 17.4.8 example proving the hb model alone is *not* DRF-SC (`Examples.hb_model_not_drf_sc`). Not yet connected to `Machine.v` (design in `docs/track-c-status.md`); the 17.4.8 commit model is next |
 | reflection, class loaders, natives beyond the list above | | not started |
 
@@ -37,11 +37,12 @@ a user object in string concatenation), identity hash codes.
 | `StackOps` (hand-assembled: every form of pop/pop2/dup*/swap, nop) | 17 | 100,000 (nop: 2,000) | 0 |
 | `canUpdate` main + fix | 2 | 100,000 | 0 |
 | `Ops2` (plain ldc, local references, goto_w) | 4 | 2,000 | 0 |
-| `Heap` (objects, arrays, exceptions, dispatch, clinit, locks) | 35 | 10,000 (run in progress at time of writing; 300 earlier: 0) | 0 |
-| `Strs` (String/StringBuilder/Character/parse/concat/switch/enum) | 53 | 10,000 (in progress; 200 earlier: 0 after 2 model fixes) | 0 |
-| `Flt` (float/double opcodes) | 31 | 10,000 (in progress; 2,000 earlier: 0) | 0 |
-| `Lam` (lambdas, method refs, boxing caches, multianewarray, EIIE/NCDFE, enum switch) | 15 | 10,000 (in progress; 300 earlier: 0) | 0 |
+| `Heap` (objects, arrays, exceptions, dispatch, clinit, locks) | 35 | 10,000 | 0 (2 methods: inputs with array sizes above the model bound 2^20 are STUCK, i.e. no claim) |
+| `Strs` (String/StringBuilder/Character/parse/concat/switch/enum) | 53 | 10,000 | 0 (2 methods: sizes above the bound STUCK) |
+| `Flt` (float/double opcodes) | 31 | 10,000 | 0 |
+| `Lam` (lambdas, method refs, boxing caches, multianewarray, EIIE/NCDFE, enum switch) | 15 | 10,000 | 0 (1 method: sizes above the bound STUCK) |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
+| java.util model classes (`targets-jdkmodel.txt`: HashMap, LinkedHashMap, tree bins, copies, ctors, sizing, strings, views, sets, ArrayList, AbstractList, AbstractMap, Collections) | 13 (+1 STUCK by design: identity-hash tie-break) | 10,000 | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
 | camel-wal whole class (`WalScenario`: TransactionLog + LayerInfo + EntryContainer + LogEntry + EntryState) main + fix | 2 | 4,516 scenarios | 0 |
 
@@ -76,7 +77,17 @@ the superclass chain). Canaries (`harness/canary.sh`, the float canaries) confir
 | `CimScenario.main_churn_grows` | real bytecode of main: `put("h"); remove("H")` repeated 12/13/14/20/50 times leaves 13/13/19/28/63 slots — removed keys' slots are never reused (unbounded growth) |
 | `CimScenario.fix_churn_bounded` | the fix keeps 13 slots for every n ≤ 64 |
 | `CimScenario.main_runs` / `fix_runs` | 40 random runs of 100 operations (4 keys × 2 case variants incl. `x-é`/`X-É`): both versions answer every put/remove/get/containsKey/size exactly like a map; main holds up to 28 slots, the fix 13 (kernel-computed, with Track B's `AbstractMap` model class) |
-Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-insensitive map, slot count ≤ max(13, 2·size + c)) by the symbolic method used for camel-wal.
+Unbounded, on the real bytecode of the fix, for **any heap** (no bound on sizes or contents), each a separate theorem:
+| Theorem | Statement |
+|---|---|
+| `CimCalls.call_cih`, `call_fi`, `call_fi1` | calls of caseInsensitiveHash / findIndex(String,int) / findIndex(String) from any frame: push `cih_spec` of the key / the result of walking the bucket's chain (`fi_walk`) |
+| `CimPut.put_present` | put of a key that is in the map: replaces the value in its slot, returns the old value |
+| `CimPut.put_new_fast`, `CimPut2.put_tail` | put of a new key with a free slot: key/value into slot `usedSlots`, slot pushed on its bucket's chain |
+| `CimPut2.put_grow` | no free slot and more than half the slots hold keys: the three arrays grow by half (Arrays.copyOf), then insert |
+| `CimCompact.call_compact`, `CimPut3.put_compact` | no free slot and at most half hold keys (**the fix**): compactRemovedSlots — its three loops proved equal to Rocq functions `c1`/`c2`/`c3` — then insert, **without growing the arrays** |
+| `CimRemove.remove_spec`, `get_spec`, `containsKey_spec` | remove (unlink from the chain, clear the slot) / get / containsKey |
+| `CimAbs.find_correct`, `insert_ok`, `insert_keys_ok`, `remove_ok` | the table invariant (every bucket's chain lists exactly the used slots of that bucket, keys pairwise different ignoring case): findIndex finds the slot of the key or -1; insertion and removal preserve the invariant (for keys on which equalsIgnoreCase is an equivalence consistent with the hash — e.g. strings without surrogates, see `CimSpec`) |
+Still open for the whole-class theorem: the effect of `c1`/`c2`/`c3` on the invariant (compaction keeps the map and the order), `resize` (needs (int)(n*0.75f) on the float model), and the composition over every operation sequence (as `WalRing.session_ok`).
 
 ## Proof infrastructure
 - `Core/Tactics.v`: symbolic execution of the frame interpreter (`symex`), used for int-only methods.
@@ -87,6 +98,16 @@ Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-i
   that make symbolic execution of the full machine cheap (a naive `cbn` of a machine step on a symbolic state
   exhausts memory). `CimHash.v` shows the pattern: precomputed facts about the loaded program by `vm_compute`,
   model calls as lemmas proved with `cbv`, one tactic per instruction kind, loop proofs by induction.
+
+## Model bugs found tonight (being fixed on branch `model-gaps`, not merged yet)
+- Instance fields are keyed by name only: a subclass field shadowing a superclass field of the same name collides
+  (CaseInsensitiveMap.values vs AbstractMap.values). Not reached by any proof or test so far.
+- invokevirtual of a private method selects from the receiver's runtime class (JVMS 5.4.6: the resolved private method
+  is selected); package-private overriding across packages (5.4.5) not checked.
+- Interfaces of the unloaded boxed types / String are incomplete (Comparable, Serializable, Constable...): an Integer
+  stored into a Serializable[] throws ArrayStoreException in the machine.
+The camel-wal and CaseInsensitiveMap proofs do not depend on these cases (no shadowed field is accessed, the private
+calls are on receivers of the declaring class, no boxed values are stored into typed arrays).
 
 ## Not done yet / known limitations
 - `jsr`/`ret` (not needed), dynamic constants, `Foo::new`, `altMetafactory`, switch-pattern and record bootstraps.
