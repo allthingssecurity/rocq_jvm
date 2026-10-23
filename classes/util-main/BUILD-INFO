@@ -1,0 +1,23 @@
+label: util-main
+remote branches containing it:  origin/fix/CAMEL-25968-core-languages-bugs origin/fix/CAMEL-26013-messaging-bugs origin/fix/CAMEL-26019-redis-couchbase-bugs 
+commit: 36bebb520a632d0d02a90680bba60e2a1e3941f9
+module: core/camel-util/src/main/java
+sources: org/apache/camel/util/StringHelper.java org/apache/camel/util/FileUtil.java org/apache/camel/util/URISupport.java org/apache/camel/util/ObjectHelper.java
+javac: javac 21.0.12.1 --release 17 -g
+built: 2026-10-23T17:20:24Z
+sha256:
+  41cf0569ca4d08b30a6ad70e5c0a0da6119d62371e96dd27257c96cd0b1dbf3d  ./org/apache/camel/util/AnnotationHelper.class
+  8b35637df6b1313a04a098a9d65276dacbd41bf5392446b5db57c0a55ffd3db8  ./org/apache/camel/util/AntPathMatcher.class
+  47bd299717cd50c7311192cdc3e8307a1541a85f93512213d40667c0faea939b  ./org/apache/camel/util/CamelURIParser.class
+  d316cc147b7418897ee8aa70df6c01a48583b8b838ce47409c00b47cc4ed8604  ./org/apache/camel/util/CastUtils.class
+  b8bf4c58ffefe89fc1d07d5e7c43543401635f2bbfeeec1528fc45d5f8f1f83a  ./org/apache/camel/util/FileUtil.class
+  eb63e3c2113b0c1ab5f8af68b94bfb755814e51bc0d35f23af48c0c5c0433e77  ./org/apache/camel/util/ObjectHelper$Holder.class
+  b375b6b7c26af43662d25c99dbbf25c9b0fea06b5c795c9806cb034b7d89b3d8  ./org/apache/camel/util/ObjectHelper.class
+  ee370a984fa3e2b22616f2395048ed5db3ef1b7b65a0d8341a22963710db5edd  ./org/apache/camel/util/Pair.class
+  51d16149f0c53e8661d2860333d2edcaa70d830c1a1f31d18e0a9f9d28bd8d52  ./org/apache/camel/util/SensitiveUtils.class
+  1301c3a14c3da434d2915dfceb1f6d0bc365d41864868d94681339ec2924bc6f  ./org/apache/camel/util/StringHelper$1.class
+  3754d52340e661e7139d421480681b167eadf33a3a473495aa4987643ed9ef49  ./org/apache/camel/util/StringHelper.class
+  c063019aa2d4cf2286a2aa3e9b5ea21e7f8ad8799d712ae7cc760f7ca6bcf361  ./org/apache/camel/util/StringQuoteHelper.class
+  6ac93d6191a18945c1148f294176ee20417cf69e2b7f30cfd199faa2fa47c855  ./org/apache/camel/util/URIScanner.class
+  4e19d290ff42cdaeb8eb070786cb98193dd4c1ffb4ba3404d48f6d4efff00480  ./org/apache/camel/util/URISupport.class
+  2996fb3cf8ab15d2fda7f2b18a1c759b281b429e07fa2f42514420685d79f8ba  ./org/apache/camel/util/UnsafeUriCharactersEncoder.class

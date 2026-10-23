@@ -1,6 +1,7 @@
 -Q theories JVM
 -arg -w -arg -notation-overridden
 theories/Core/Int.v
+theories/Core/Float.v
 theories/Core/Instr.v
 theories/Core/Desc.v
 theories/Core/Semantics.v

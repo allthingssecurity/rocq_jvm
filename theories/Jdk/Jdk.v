@@ -42,10 +42,107 @@ Definition ret_int (s : mstate) (z : Z) : model_result := MOk (Some (VInt z)) s.
 Definition ret_bool (s : mstate) (b : bool) : model_result := MOk (Some (VInt (if b then 1 else 0))) s.
 
 Definition slen_v (l : list value) : Z := Z.of_nat (length l).
+Definition value_eqb (a b : value) : bool :=
+  match a, b with
+  | VInt x, VInt y | VLong x, VLong y | VFloat x, VFloat y | VDouble x, VDouble y | VRef x, VRef y => Z.eqb x y
+  | VNull, VNull => true
+  | _, _ => false
+  end.
 Definition IAE := "java/lang/IllegalArgumentException".
 
 Definition is_builtin_throwable (c : string) : bool :=
   match subclass nil 16 c "java/lang/Throwable" with Some true => true | _ => false end.
+
+(** ** Boxing (java.lang.Integer/Long/Short/Byte/Character/Boolean).
+    valueOf uses the caches required by the JLS 5.1.7 / the JDK: Integer, Long,
+    Short in [-128, 127], Byte always, Character in [0, 127], Boolean.TRUE/FALSE.
+    A box is an object with one field "value". *)
+Definition box_obj (cls : string) (v : value) : object := OObj cls [("value", v)].
+
+Definition box_cached (cls : string) (z : Z) : bool :=
+  if String.eqb cls "java/lang/Character" then (0 <=? z) && (z <=? 127)
+  else if String.eqb cls "java/lang/Boolean" || String.eqb cls "java/lang/Byte" then true
+  else (-128 <=? z) && (z <=? 127).
+
+Definition box (s : mstate) (cls : string) (v : value) : Z * mstate :=
+  let z := match v with VInt z | VLong z => z | _ => 0 end in
+  if box_cached cls z then
+    let key := "#box:" ++ cls ++ ":" ++ intern_key (OStr (z_units z)) in
+    match assoc key (ms_statics s) with
+    | Some (VRef l) => (l, s)
+    | _ => let (l, s1) := alloc s (box_obj cls v) in
+           (l, {| ms_heap := ms_heap s1; ms_next := ms_next s1; ms_statics := (key, VRef l) :: ms_statics s1;
+                  ms_inited := ms_inited s1; ms_locks := ms_locks s1; ms_frames := ms_frames s1 |})
+    end
+  else alloc s (box_obj cls v).
+
+Definition box_value (s : mstate) (cls : string) (v : value) : option value :=
+  match v with
+  | VRef l => match ms_heap s l with
+              | Some (OObj c [("value", w)]) => if String.eqb c cls then Some w else None
+              | _ => None
+              end
+  | _ => None
+  end.
+
+Definition prim_desc (cls : string) : string :=
+  if String.eqb cls "java/lang/Integer" then "I" else if String.eqb cls "java/lang/Long" then "J"
+  else if String.eqb cls "java/lang/Short" then "S" else if String.eqb cls "java/lang/Byte" then "B"
+  else if String.eqb cls "java/lang/Character" then "C" else if String.eqb cls "java/lang/Boolean" then "Z" else "?".
+
+Definition is_box_class (cls : string) : bool := negb (String.eqb (prim_desc cls) "?").
+
+Definition box_model (cls name desc : string) (args : list value) (s : mstate) : model_result :=
+  let pd := prim_desc cls in
+  if String.eqb name "valueOf" && String.eqb desc ("(" ++ pd ++ ")L" ++ cls ++ ";") then
+    match args with [v] => let (l, s') := box s cls v in MOk (Some (VRef l)) s' | _ => MStuckModel "valueOf" end
+  else if String.eqb name "<get>TRUE" && String.eqb cls "java/lang/Boolean" then
+    let (l, s') := box s cls (VInt 1) in MOk (Some (VRef l)) s'
+  else if String.eqb name "<get>FALSE" && String.eqb cls "java/lang/Boolean" then
+    let (l, s') := box s cls (VInt 0) in MOk (Some (VRef l)) s'
+  else
+  match args with
+  | this :: more =>
+    match box_value s cls this with
+    | None => MNoModel
+    | Some w =>
+      let z := match w with VInt z | VLong z => z | _ => 0 end in
+      let key := name ++ desc in
+      if String.eqb key "intValue()I" then ret_int s (wrap32 z)
+      else if String.eqb key "longValue()J" then MOk (Some (VLong z)) s
+      else if String.eqb key "shortValue()S" then ret_int s (i2s z)
+      else if String.eqb key "byteValue()B" then ret_int s (i2b z)
+      else if String.eqb key "charValue()C" || String.eqb key "booleanValue()Z" then MOk (Some w) s
+      else if String.eqb key "hashCode()I" then
+        if String.eqb cls "java/lang/Long" then ret_int s (wrap32 (Z.lxor z (Z.shiftr (z mod 2 ^ 64) 32)))
+        else if String.eqb cls "java/lang/Boolean" then ret_int s (if z =? 0 then 1237 else 1231)
+        else ret_int s z
+      else if String.eqb key "equals(Ljava/lang/Object;)Z" then
+        match more with
+        | [o] => ret_bool s (match box_value s cls o with Some w' => value_eqb w w' | None => false end)
+        | _ => MStuckModel "equals"
+        end
+      else if String.eqb key "toString()Ljava/lang/String;" then
+        if String.eqb cls "java/lang/Character" then ret_new s (OStr [z])
+        else if String.eqb cls "java/lang/Boolean" then ret_lit s (bool_units (negb (z =? 0)))
+        else ret_new s (OStr (z_units z))
+      else if String.eqb name "compareTo" then
+        match more with
+        | [VNull] => MThrow NPE
+        | [o] => match box_value s cls o with
+                 | Some (VInt z' | VLong z') =>
+                     if String.eqb cls "java/lang/Boolean" then ret_int s (z - z')
+                     else if String.eqb cls "java/lang/Character" || String.eqb cls "java/lang/Short"
+                             || String.eqb cls "java/lang/Byte" then ret_int s (z - z')
+                     else ret_int s (lcmp z z')
+                 | _ => MStuckModel "compareTo"
+                 end
+        | _ => MStuckModel "compareTo"
+        end
+      else MNoModel
+    end
+  | nil => MNoModel
+  end.
 
 (** ** java.lang.String *)
 Definition string_model (e : jenv) (name desc : string) (args : list value) (s : mstate) : model_result :=
@@ -359,7 +456,17 @@ Definition objects_model (name desc : string) (args : list value) (s : mstate) :
            | VNull => ret_bool s false
            | _ => match str_of s a with
                   | Some ua => ret_bool s (match str_of s b with Some ub => units_eqb ua ub | None => false end)
-                  | None => MStuckModel "Objects.equals: equals() callback"
+                  | None =>
+                      match a with
+                      | VRef la => match ms_heap s la with
+                                   | Some (OObj c [("value", wa)]) =>
+                                       if is_box_class c then
+                                         ret_bool s (match box_value s c b with Some wb => value_eqb wa wb | None => false end)
+                                       else MStuckModel "Objects.equals: equals() callback"
+                                   | _ => MStuckModel "Objects.equals: equals() callback"
+                                   end
+                      | _ => MStuckModel "Objects.equals: equals() callback"
+                      end
                   end
            end
     | _ => MStuckModel "Objects.equals"
@@ -557,6 +664,7 @@ Definition object_model (name desc : string) (args : list value) (s : mstate) : 
   | nil => MNoModel
   end.
 
+
 (** ** The JDK model *)
 Definition jdk_model (p : program) (e : jenv) : model :=
   fun cls name desc args s =>
@@ -578,6 +686,8 @@ Definition jdk_model (p : program) (e : jenv) : model :=
       end
     else if String.eqb cls "java/lang/StringBuilder" || String.eqb cls "java/lang/AbstractStringBuilder" then
       sb_model name desc args s
+    else if is_box_class cls && match box_model cls name desc args s with MNoModel => false | _ => true end then
+      box_model cls name desc args s
     else if String.eqb cls "java/lang/Character" then char_model e name desc args s
     else if String.eqb cls "java/lang/Integer" || String.eqb cls "java/lang/Long" || String.eqb cls "java/lang/Math" then
       num_model e cls name desc args s

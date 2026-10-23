@@ -32,8 +32,19 @@ def rstring():
             c = rng.choice(ALPH)
             cs.append(ord(c) if isinstance(c, str) else c)
     return "s:" + "".join("%04x" % c for c in cs)
+import struct
+def fbits(x): return struct.unpack('>I', struct.pack('>f', x))[0]
+def dbits(x): return struct.unpack('>Q', struct.pack('>d', x))[0]
+FPOOL = [0, 0x80000000, 0x7f800000, 0xff800000, 0x7fc00000, 0x7f800001, 0xffc00001, 1, 0x80000001, 0x7f7fffff,
+         0x00800000, 0x007fffff] + [fbits(x) for x in (1.0, -1.0, 0.5, 0.1, 2.5, -2.5, 3.5, 1e10, -1e10, 2147483647.0,
+         2147483648.0, -2147483648.0, 9.223372036854776e18, 16777216.0, 16777217.0, 1e-40, 123.456)]
+DPOOL = [0, 1 << 63, 0x7ff0000000000000, 0xfff0000000000000, 0x7ff8000000000000, 0x7ff0000000000001, 1,
+         0x7fefffffffffffff, 0x0010000000000000] + [dbits(x) for x in (1.0, -1.0, 0.5, 0.1, 2.5, -2.5, 1e300, -1e-300,
+         2147483647.5, -2147483648.5, 9.223372036854776e18, -9.3e18, 4503599627370497.0, 1e-310, 3.4028235677973366e38, 1.401298464324817e-45)]
 def val(t):
     if t == 'Ljava/lang/String;': return rstring()
+    if t == 'F': return rng.choice(FPOOL) if rng.random() < 0.5 else (fbits(rng.uniform(-1e6, 1e6)) if rng.random() < 0.3 else rng.getrandbits(32))
+    if t == 'D': return rng.choice(DPOOL) if rng.random() < 0.5 else (dbits(rng.uniform(-1e12, 1e12)) if rng.random() < 0.3 else rng.getrandbits(64))
     if t in P and rng.random() < 0.05: return 0          # divisors / shift distances / zero tests
     if t == 'Z': return rng.randint(0, 1)
     if t == 'C': return rng.choice([0, 1, 65535, rng.randint(0, 65535)])

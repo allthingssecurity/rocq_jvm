@@ -17,7 +17,7 @@
     the heap (the handler needs the exception object). *)
 
 From Stdlib Require Import ZArith String List Bool Lia.
-From JVM.Core Require Import Int Instr Desc.
+From JVM.Core Require Import Int Instr Desc Float.
 Import ListNotations.
 Open Scope bool_scope.
 Open Scope Z_scope.
@@ -131,7 +131,29 @@ Definition conv_int (c : conv) (v : value) : option value :=
   | I2B, VInt a => Some (VInt (i2b a))
   | I2C, VInt a => Some (VInt (i2c a))
   | I2S, VInt a => Some (VInt (i2s a))
+  (* floating point (JVMS 6.5 i2f ... d2f; Float.v) *)
+  | I2F, VInt a => Some (VFloat (Float.i2f a))
+  | I2D, VInt a => Some (VDouble (Float.i2d a))
+  | L2F, VLong a => Some (VFloat (Float.l2f a))
+  | L2D, VLong a => Some (VDouble (Float.l2d a))
+  | F2I, VFloat a => Some (VInt (Float.f2i a))
+  | F2L, VFloat a => Some (VLong (Float.f2l a))
+  | F2D, VFloat a => Some (VDouble (Float.f2d a))
+  | D2I, VDouble a => Some (VInt (Float.d2i a))
+  | D2L, VDouble a => Some (VLong (Float.d2l a))
+  | D2F, VDouble a => Some (VFloat (Float.d2f a))
   | _, _ => None
+  end.
+
+Definition farith (op : binop) (a b : Z) : option Z :=
+  match op with
+  | Add => Some (fadd32 a b) | Sub => Some (fsub32 a b) | Mul => Some (fmul32 a b)
+  | Div => Some (fdiv32 a b) | Rem => Some (frem32 a b) | _ => None
+  end.
+Definition darith (op : binop) (a b : Z) : option Z :=
+  match op with
+  | Add => Some (dadd64 a b) | Sub => Some (dsub64 a b) | Mul => Some (dmul64 a b)
+  | Div => Some (ddiv64 a b) | Rem => Some (drem64 a b) | _ => None
   end.
 
 Fixpoint lookup_pairs (k : Z) (ps : list (Z * pc)) : option pc :=
@@ -273,6 +295,18 @@ Definition step (c : code) (rt : option jtype) (f : frame) : outcome :=
         | None => Stuck "conversion unsupported or wrong operand"
         end
     | Lcmp, VLong b :: VLong a :: r => go (VInt (lcmp a b) :: r)
+    | Fconst bits, _ => go (VFloat bits :: st)
+    | Dconst bits, _ => go (VDouble bits :: st)
+    | FBin op, VFloat b :: VFloat a :: r =>
+        match farith op a b with Some z => go (VFloat z :: r) | None => Stuck "float op" end
+    | DBin op, VDouble b :: VDouble a :: r =>
+        match darith op a b with Some z => go (VDouble z :: r) | None => Stuck "double op" end
+    | FNeg, VFloat a :: r => go (VFloat (fneg32 a) :: r)
+    | DNeg, VDouble a :: r => go (VDouble (dneg64 a) :: r)
+    | FCmp Fcmpl, VFloat b :: VFloat a :: r => go (VInt (fcmp32 false a b) :: r)
+    | FCmp Fcmpg, VFloat b :: VFloat a :: r => go (VInt (fcmp32 true a b) :: r)
+    | FCmp Dcmpl, VDouble b :: VDouble a :: r => go (VInt (dcmp64 false a b) :: r)
+    | FCmp Dcmpg, VDouble b :: VDouble a :: r => go (VInt (dcmp64 true a b) :: r)
     | If cnd t, VInt a :: r => if cond_holds cnd a 0 then jump t r else go r
     | IfIcmp cnd t, VInt b :: VInt a :: r => if cond_holds cnd a b then jump t r else go r
     | IfAcmp eq t, b :: a :: r =>

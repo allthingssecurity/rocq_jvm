@@ -49,6 +49,8 @@ public class DiffRunner {
                         args[i] = new String(cs);
                         continue;
                     }
+                    if (pt[i] == float.class) { args[i] = Float.intBitsToFloat((int) Long.parseLong(t[i])); continue; }
+                    if (pt[i] == double.class) { args[i] = Double.longBitsToDouble(Long.parseUnsignedLong(t[i])); continue; }
                     long v = Long.parseLong(t[i]);
                     if (pt[i] == long.class) args[i] = v;
                     else if (pt[i] == int.class) args[i] = (int) v;
@@ -70,6 +72,8 @@ public class DiffRunner {
                         res = sb.toString().trim();
                     }
                     else if (o instanceof Boolean b) res = "V " + (b ? 1 : 0);
+                    else if (o instanceof Float fl) res = "F " + Integer.toUnsignedString(Float.floatToIntBits(fl));
+                    else if (o instanceof Double db) res = "D " + Long.toUnsignedString(Double.doubleToLongBits(db));
                     else if (o instanceof Character c) res = "V " + (int) c;
                     else res = "V " + ((Number) o).longValue();
                 } catch (InvocationTargetException e) {

@@ -66,6 +66,8 @@ let () =
         let toks = String.split_on_char ' ' (String.trim line) |> List.filter (fun s -> s <> "") in
         let args = List.map2 (fun t s -> match t with
             | TLong -> JVal (VLong (z_of_string s))
+            | TFloat -> JVal (VFloat (z_of_string s))
+            | TDouble -> JVal (VDouble (z_of_string s))
             | TRef _ when s = "null" -> JNull
             | TRef _ when String.length s >= 2 && String.sub s 0 2 = "s:" -> JStr (hex_units (String.sub s 2 (String.length s - 2)))
             | _ -> JVal (VInt (z_of_string s))) ps toks in
@@ -73,6 +75,8 @@ let () =
           | MRValue (None, _) -> "V void"
           | MRValue (Some (VInt z), _) | MRValue (Some (VLong z), _) -> "V " ^ z_to_string z
           | MRValue (Some VNull, _) -> "V null"
+          | MRValue (Some (VFloat b), _) -> "F " ^ z_to_string (canon32 b)
+          | MRValue (Some (VDouble b), _) -> "D " ^ z_to_string (canon64 b)
           | MRValue (Some v, s) -> (match str_value s v with Some u -> String.trim ("S " ^ units_hex u) | None -> "V other")
           | MRExc (e, s) -> "E " ^ exn_class s e
           | MRStuck w -> "STUCK " ^ w

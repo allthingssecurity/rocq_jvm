@@ -9,7 +9,7 @@
 
 From Stdlib Require Import ZArith String Ascii List.
 From Stdlib Require Extraction ExtrOcamlBasic ExtrOcamlNativeString.
-From JVM.Core Require Import Int Instr Desc Semantics.
+From JVM.Core Require Import Int Instr Desc Semantics Float.
 From JVM.Loader Require Import ClassFile.
 From JVM.Core Require Import Machine.
 From JVM.Jdk Require Import Strings Jdk.
@@ -45,4 +45,4 @@ Set Extraction Output Directory "extraction".
 Extraction "jvm.ml" parse_class load_method find_method invoke_static parse_mdesc
   z_of_string z_to_string INT_MIN
   load_program call_static base_model exn_class
-  jdk_model call_static_args str_value.
+  jdk_model call_static_args str_value Float.canon32 Float.canon64.

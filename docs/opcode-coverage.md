@@ -2,211 +2,212 @@
 
 JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loader/ClassFile.v`.
 
-- with semantics in `theories/Core/Semantics.v`: **111** (3 of them partially)
-- of those, occurring in the differentially tested bytecode: **108**
+- with semantics in `theories/Core/Semantics.v`: **199** (11 of them partially)
+- of those, occurring in the differentially tested bytecode: **189**
 - `jsr`, `ret`, `jsr_w` are decoded but rejected: class files of version >= 51 cannot contain them.
+- Semantics: frame-local opcodes in `theories/Core/Semantics.v` (+ `Float.v`), heap/call/class opcodes in `theories/Core/Machine.v`, JDK methods in `theories/Jdk/`.
 
 | code | opcode | decoded | semantics | differentially tested |
 |---|---|---|---|---|
 | 0 | nop | yes | yes | yes (1 sites) |
-| 1 | aconst_null | yes | yes | yes (5 sites) |
-| 2 | iconst_m1 | yes | yes | yes (1 sites) |
-| 3 | iconst_0 | yes | yes | yes (62 sites) |
-| 4 | iconst_1 | yes | yes | yes (71 sites) |
-| 5 | iconst_2 | yes | yes | yes (45 sites) |
-| 6 | iconst_3 | yes | yes | yes (338 sites) |
-| 7 | iconst_4 | yes | yes | yes (39 sites) |
-| 8 | iconst_5 | yes | yes | yes (39 sites) |
-| 9 | lconst_0 | yes | yes | yes (20 sites) |
+| 1 | aconst_null | yes | yes | yes (18 sites) |
+| 2 | iconst_m1 | yes | yes | yes (4 sites) |
+| 3 | iconst_0 | yes | yes | yes (177 sites) |
+| 4 | iconst_1 | yes | yes | yes (135 sites) |
+| 5 | iconst_2 | yes | yes | yes (87 sites) |
+| 6 | iconst_3 | yes | yes | yes (373 sites) |
+| 7 | iconst_4 | yes | yes | yes (45 sites) |
+| 8 | iconst_5 | yes | yes | yes (44 sites) |
+| 9 | lconst_0 | yes | yes | yes (21 sites) |
 | 10 | lconst_1 | yes | yes | yes (5 sites) |
-| 11 | fconst_0 | yes | no | no |
-| 12 | fconst_1 | yes | no | no |
-| 13 | fconst_2 | yes | no | no |
-| 14 | dconst_0 | yes | no | no |
-| 15 | dconst_1 | yes | no | no |
-| 16 | bipush | yes | yes | yes (7175 sites) |
-| 17 | sipush | yes | yes | yes (227 sites) |
-| 18 | ldc | yes | partial: int constants only (String/Class/MethodType/MethodHandle/dynamic: Phase 2/4/9) | yes (3 sites) |
-| 19 | ldc_w | yes | partial: int constants only | yes (4 sites) |
-| 20 | ldc2_w | yes | partial: long constants only (double: Phase 5) | yes (305 sites) |
-| 21 | iload | yes | yes | yes (372 sites) |
-| 22 | lload | yes | yes | yes (178 sites) |
-| 23 | fload | yes | no | no |
-| 24 | dload | yes | no | no |
-| 25 | aload | yes | yes | yes (5 sites) |
-| 26 | iload_0 | yes | yes | yes (66 sites) |
-| 27 | iload_1 | yes | yes | yes (3645 sites) |
-| 28 | iload_2 | yes | yes | yes (3622 sites) |
-| 29 | iload_3 | yes | yes | yes (15 sites) |
-| 30 | lload_0 | yes | yes | yes (29 sites) |
-| 31 | lload_1 | yes | yes | yes (6 sites) |
-| 32 | lload_2 | yes | yes | yes (19 sites) |
+| 11 | fconst_0 | yes | yes | yes (2 sites) |
+| 12 | fconst_1 | yes | yes | yes (1 sites) |
+| 13 | fconst_2 | yes | yes | yes (1 sites) |
+| 14 | dconst_0 | yes | yes | yes (2 sites) |
+| 15 | dconst_1 | yes | yes | yes (3 sites) |
+| 16 | bipush | yes | yes | yes (7231 sites) |
+| 17 | sipush | yes | yes | yes (238 sites) |
+| 18 | ldc | yes | partial: int/float/String/Class constants; MethodType/MethodHandle/dynamic constants not yet | yes (16 sites) |
+| 19 | ldc_w | yes | partial: as ldc | yes (18 sites) |
+| 20 | ldc2_w | yes | partial: long/double constants (dynamic constants not yet) | yes (313 sites) |
+| 21 | iload | yes | yes | yes (421 sites) |
+| 22 | lload | yes | yes | yes (181 sites) |
+| 23 | fload | yes | yes | yes (2 sites) |
+| 24 | dload | yes | yes | yes (4 sites) |
+| 25 | aload | yes | yes | yes (51 sites) |
+| 26 | iload_0 | yes | yes | yes (183 sites) |
+| 27 | iload_1 | yes | yes | yes (3691 sites) |
+| 28 | iload_2 | yes | yes | yes (3664 sites) |
+| 29 | iload_3 | yes | yes | yes (25 sites) |
+| 30 | lload_0 | yes | yes | yes (36 sites) |
+| 31 | lload_1 | yes | yes | yes (15 sites) |
+| 32 | lload_2 | yes | yes | yes (24 sites) |
 | 33 | lload_3 | yes | yes | yes (2 sites) |
-| 34 | fload_0 | yes | no | no |
-| 35 | fload_1 | yes | no | no |
-| 36 | fload_2 | yes | no | no |
-| 37 | fload_3 | yes | no | no |
-| 38 | dload_0 | yes | no | no |
-| 39 | dload_1 | yes | no | no |
-| 40 | dload_2 | yes | no | no |
-| 41 | dload_3 | yes | no | no |
-| 42 | aload_0 | yes | yes | no |
-| 43 | aload_1 | yes | yes | yes (3 sites) |
-| 44 | aload_2 | yes | yes | yes (3 sites) |
-| 45 | aload_3 | yes | yes | yes (4 sites) |
-| 46 | iaload | yes | no | no |
-| 47 | laload | yes | no | no |
-| 48 | faload | yes | no | no |
-| 49 | daload | yes | no | no |
-| 50 | aaload | yes | no | no |
-| 51 | baload | yes | no | no |
-| 52 | caload | yes | no | no |
-| 53 | saload | yes | no | no |
-| 54 | istore | yes | yes | yes (340 sites) |
-| 55 | lstore | yes | yes | yes (166 sites) |
-| 56 | fstore | yes | no | no |
-| 57 | dstore | yes | no | no |
-| 58 | astore | yes | yes | yes (4 sites) |
-| 59 | istore_0 | yes | yes | yes (3 sites) |
-| 60 | istore_1 | yes | yes | yes (3609 sites) |
-| 61 | istore_2 | yes | yes | yes (7 sites) |
-| 62 | istore_3 | yes | yes | yes (7 sites) |
+| 34 | fload_0 | yes | yes | yes (17 sites) |
+| 35 | fload_1 | yes | yes | yes (11 sites) |
+| 36 | fload_2 | yes | yes | no |
+| 37 | fload_3 | yes | yes | yes (2 sites) |
+| 38 | dload_0 | yes | yes | yes (19 sites) |
+| 39 | dload_1 | yes | yes | no |
+| 40 | dload_2 | yes | yes | yes (13 sites) |
+| 41 | dload_3 | yes | yes | yes (2 sites) |
+| 42 | aload_0 | yes | yes | yes (43 sites) |
+| 43 | aload_1 | yes | yes | yes (95 sites) |
+| 44 | aload_2 | yes | yes | yes (46 sites) |
+| 45 | aload_3 | yes | yes | yes (43 sites) |
+| 46 | iaload | yes | yes | yes (12 sites) |
+| 47 | laload | yes | yes | yes (1 sites) |
+| 48 | faload | yes | yes | yes (2 sites) |
+| 49 | daload | yes | yes | yes (1 sites) |
+| 50 | aaload | yes | yes | yes (14 sites) |
+| 51 | baload | yes | yes | yes (8 sites) |
+| 52 | caload | yes | yes | yes (4 sites) |
+| 53 | saload | yes | yes | yes (2 sites) |
+| 54 | istore | yes | yes | yes (369 sites) |
+| 55 | lstore | yes | yes | yes (169 sites) |
+| 56 | fstore | yes | yes | yes (2 sites) |
+| 57 | dstore | yes | yes | yes (2 sites) |
+| 58 | astore | yes | yes | yes (23 sites) |
+| 59 | istore_0 | yes | yes | yes (4 sites) |
+| 60 | istore_1 | yes | yes | yes (3616 sites) |
+| 61 | istore_2 | yes | yes | yes (32 sites) |
+| 62 | istore_3 | yes | yes | yes (13 sites) |
 | 63 | lstore_0 | yes | yes | yes (1 sites) |
-| 64 | lstore_1 | yes | yes | yes (2 sites) |
+| 64 | lstore_1 | yes | yes | yes (4 sites) |
 | 65 | lstore_2 | yes | yes | yes (1 sites) |
 | 66 | lstore_3 | yes | yes | yes (1 sites) |
-| 67 | fstore_0 | yes | no | no |
-| 68 | fstore_1 | yes | no | no |
-| 69 | fstore_2 | yes | no | no |
-| 70 | fstore_3 | yes | no | no |
-| 71 | dstore_0 | yes | no | no |
-| 72 | dstore_1 | yes | no | no |
-| 73 | dstore_2 | yes | no | no |
-| 74 | dstore_3 | yes | no | no |
+| 67 | fstore_0 | yes | yes | no |
+| 68 | fstore_1 | yes | yes | no |
+| 69 | fstore_2 | yes | yes | no |
+| 70 | fstore_3 | yes | yes | no |
+| 71 | dstore_0 | yes | yes | no |
+| 72 | dstore_1 | yes | yes | no |
+| 73 | dstore_2 | yes | yes | no |
+| 74 | dstore_3 | yes | yes | yes (2 sites) |
 | 75 | astore_0 | yes | yes | no |
-| 76 | astore_1 | yes | yes | yes (1 sites) |
-| 77 | astore_2 | yes | yes | yes (1 sites) |
-| 78 | astore_3 | yes | yes | yes (2 sites) |
-| 79 | iastore | yes | no | no |
-| 80 | lastore | yes | no | no |
-| 81 | fastore | yes | no | no |
-| 82 | dastore | yes | no | no |
-| 83 | aastore | yes | no | no |
-| 84 | bastore | yes | no | no |
-| 85 | castore | yes | no | no |
-| 86 | sastore | yes | no | no |
-| 87 | pop | yes | yes | yes (1 sites) |
+| 76 | astore_1 | yes | yes | yes (39 sites) |
+| 77 | astore_2 | yes | yes | yes (22 sites) |
+| 78 | astore_3 | yes | yes | yes (19 sites) |
+| 79 | iastore | yes | yes | yes (8 sites) |
+| 80 | lastore | yes | yes | yes (1 sites) |
+| 81 | fastore | yes | yes | yes (1 sites) |
+| 82 | dastore | yes | yes | yes (1 sites) |
+| 83 | aastore | yes | yes | yes (13 sites) |
+| 84 | bastore | yes | yes | yes (7 sites) |
+| 85 | castore | yes | yes | yes (3 sites) |
+| 86 | sastore | yes | yes | yes (2 sites) |
+| 87 | pop | yes | yes | yes (5 sites) |
 | 88 | pop2 | yes | yes | yes (2 sites) |
-| 89 | dup | yes | yes | yes (2 sites) |
+| 89 | dup | yes | yes | yes (42 sites) |
 | 90 | dup_x1 | yes | yes | yes (1 sites) |
 | 91 | dup_x2 | yes | yes | yes (2 sites) |
 | 92 | dup2 | yes | yes | yes (3 sites) |
 | 93 | dup2_x1 | yes | yes | yes (2 sites) |
 | 94 | dup2_x2 | yes | yes | yes (4 sites) |
 | 95 | swap | yes | yes | yes (1 sites) |
-| 96 | iadd | yes | yes | yes (7518 sites) |
-| 97 | ladd | yes | yes | yes (155 sites) |
-| 98 | fadd | yes | no | no |
-| 99 | dadd | yes | no | no |
-| 100 | isub | yes | yes | yes (7 sites) |
-| 101 | lsub | yes | yes | yes (4 sites) |
-| 102 | fsub | yes | no | no |
-| 103 | dsub | yes | no | no |
-| 104 | imul | yes | yes | yes (3906 sites) |
-| 105 | lmul | yes | yes | yes (257 sites) |
-| 106 | fmul | yes | no | no |
-| 107 | dmul | yes | no | no |
-| 108 | idiv | yes | yes | yes (4 sites) |
+| 96 | iadd | yes | yes | yes (7586 sites) |
+| 97 | ladd | yes | yes | yes (158 sites) |
+| 98 | fadd | yes | yes | yes (6 sites) |
+| 99 | dadd | yes | yes | yes (7 sites) |
+| 100 | isub | yes | yes | yes (13 sites) |
+| 101 | lsub | yes | yes | yes (5 sites) |
+| 102 | fsub | yes | yes | yes (4 sites) |
+| 103 | dsub | yes | yes | yes (4 sites) |
+| 104 | imul | yes | yes | yes (3925 sites) |
+| 105 | lmul | yes | yes | yes (260 sites) |
+| 106 | fmul | yes | yes | yes (4 sites) |
+| 107 | dmul | yes | yes | yes (7 sites) |
+| 108 | idiv | yes | yes | yes (10 sites) |
 | 109 | ldiv | yes | yes | yes (3 sites) |
-| 110 | fdiv | yes | no | no |
-| 111 | ddiv | yes | no | no |
-| 112 | irem | yes | yes | yes (3 sites) |
+| 110 | fdiv | yes | yes | yes (1 sites) |
+| 111 | ddiv | yes | yes | yes (4 sites) |
+| 112 | irem | yes | yes | yes (10 sites) |
 | 113 | lrem | yes | yes | yes (3 sites) |
-| 114 | frem | yes | no | no |
-| 115 | drem | yes | no | no |
-| 116 | ineg | yes | yes | yes (3 sites) |
+| 114 | frem | yes | yes | yes (1 sites) |
+| 115 | drem | yes | yes | yes (1 sites) |
+| 116 | ineg | yes | yes | yes (6 sites) |
 | 117 | lneg | yes | yes | yes (1 sites) |
-| 118 | fneg | yes | no | no |
-| 119 | dneg | yes | no | no |
+| 118 | fneg | yes | yes | yes (1 sites) |
+| 119 | dneg | yes | yes | yes (1 sites) |
 | 120 | ishl | yes | yes | yes (3 sites) |
 | 121 | lshl | yes | yes | yes (1 sites) |
-| 122 | ishr | yes | yes | yes (1 sites) |
+| 122 | ishr | yes | yes | yes (3 sites) |
 | 123 | lshr | yes | yes | yes (3 sites) |
-| 124 | iushr | yes | yes | yes (3 sites) |
-| 125 | lushr | yes | yes | yes (4 sites) |
-| 126 | iand | yes | yes | yes (9 sites) |
-| 127 | land | yes | yes | yes (3 sites) |
-| 128 | ior | yes | yes | yes (2 sites) |
+| 124 | iushr | yes | yes | yes (4 sites) |
+| 125 | lushr | yes | yes | yes (6 sites) |
+| 126 | iand | yes | yes | yes (48 sites) |
+| 127 | land | yes | yes | yes (4 sites) |
+| 128 | ior | yes | yes | yes (18 sites) |
 | 129 | lor | yes | yes | yes (1 sites) |
-| 130 | ixor | yes | yes | yes (5 sites) |
-| 131 | lxor | yes | yes | yes (55 sites) |
-| 132 | iinc | yes | yes | yes (9 sites) |
-| 133 | i2l | yes | yes | yes (145 sites) |
-| 134 | i2f | yes | no | no |
-| 135 | i2d | yes | no | no |
-| 136 | l2i | yes | yes | yes (6 sites) |
-| 137 | l2f | yes | no | no |
-| 138 | l2d | yes | no | no |
-| 139 | f2i | yes | no | no |
-| 140 | f2l | yes | no | no |
-| 141 | f2d | yes | no | no |
-| 142 | d2i | yes | no | no |
-| 143 | d2l | yes | no | no |
-| 144 | d2f | yes | no | no |
-| 145 | i2b | yes | yes | yes (2 sites) |
-| 146 | i2c | yes | yes | yes (1 sites) |
-| 147 | i2s | yes | yes | yes (1 sites) |
+| 130 | ixor | yes | yes | yes (6 sites) |
+| 131 | lxor | yes | yes | yes (56 sites) |
+| 132 | iinc | yes | yes | yes (41 sites) |
+| 133 | i2l | yes | yes | yes (150 sites) |
+| 134 | i2f | yes | yes | yes (4 sites) |
+| 135 | i2d | yes | yes | yes (2 sites) |
+| 136 | l2i | yes | yes | yes (9 sites) |
+| 137 | l2f | yes | yes | yes (1 sites) |
+| 138 | l2d | yes | yes | yes (4 sites) |
+| 139 | f2i | yes | yes | yes (1 sites) |
+| 140 | f2l | yes | yes | yes (1 sites) |
+| 141 | f2d | yes | yes | yes (5 sites) |
+| 142 | d2i | yes | yes | yes (1 sites) |
+| 143 | d2l | yes | yes | yes (2 sites) |
+| 144 | d2f | yes | yes | yes (4 sites) |
+| 145 | i2b | yes | yes | yes (7 sites) |
+| 146 | i2c | yes | yes | yes (15 sites) |
+| 147 | i2s | yes | yes | yes (4 sites) |
 | 148 | lcmp | yes | yes | yes (9 sites) |
-| 149 | fcmpl | yes | no | no |
-| 150 | fcmpg | yes | no | no |
-| 151 | dcmpl | yes | no | no |
-| 152 | dcmpg | yes | no | no |
-| 153 | ifeq | yes | yes | yes (6 sites) |
-| 154 | ifne | yes | yes | yes (4 sites) |
-| 155 | iflt | yes | yes | yes (2 sites) |
-| 156 | ifge | yes | yes | yes (3 sites) |
-| 157 | ifgt | yes | yes | yes (2 sites) |
-| 158 | ifle | yes | yes | yes (4 sites) |
+| 149 | fcmpl | yes | yes | yes (4 sites) |
+| 150 | fcmpg | yes | yes | yes (2 sites) |
+| 151 | dcmpl | yes | yes | yes (4 sites) |
+| 152 | dcmpg | yes | yes | yes (2 sites) |
+| 153 | ifeq | yes | yes | yes (37 sites) |
+| 154 | ifne | yes | yes | yes (14 sites) |
+| 155 | iflt | yes | yes | yes (4 sites) |
+| 156 | ifge | yes | yes | yes (6 sites) |
+| 157 | ifgt | yes | yes | yes (4 sites) |
+| 158 | ifle | yes | yes | yes (17 sites) |
 | 159 | if_icmpeq | yes | yes | yes (1 sites) |
-| 160 | if_icmpne | yes | yes | yes (5 sites) |
+| 160 | if_icmpne | yes | yes | yes (9 sites) |
 | 161 | if_icmplt | yes | yes | yes (4 sites) |
-| 162 | if_icmpge | yes | yes | yes (6 sites) |
-| 163 | if_icmpgt | yes | yes | yes (3 sites) |
-| 164 | if_icmple | yes | yes | yes (5 sites) |
+| 162 | if_icmpge | yes | yes | yes (25 sites) |
+| 163 | if_icmpgt | yes | yes | yes (4 sites) |
+| 164 | if_icmple | yes | yes | yes (11 sites) |
 | 165 | if_acmpeq | yes | yes | yes (1 sites) |
-| 166 | if_acmpne | yes | yes | yes (3 sites) |
-| 167 | goto | yes | yes | yes (28 sites) |
+| 166 | if_acmpne | yes | yes | yes (15 sites) |
+| 167 | goto | yes | yes | yes (119 sites) |
 | 168 | jsr | yes | no | no |
 | 169 | ret | yes | no | no |
-| 170 | tableswitch | yes | yes | yes (1 sites) |
-| 171 | lookupswitch | yes | yes | yes (1 sites) |
-| 172 | ireturn | yes | yes | yes (78 sites) |
-| 173 | lreturn | yes | yes | yes (36 sites) |
-| 174 | freturn | yes | no | no |
-| 175 | dreturn | yes | no | no |
-| 176 | areturn | yes | yes | no |
-| 177 | return | yes | yes | yes (1 sites) |
-| 178 | getstatic | yes | no | no |
-| 179 | putstatic | yes | no | no |
-| 180 | getfield | yes | no | no |
-| 181 | putfield | yes | no | no |
-| 182 | invokevirtual | yes | no | no |
-| 183 | invokespecial | yes | no | no |
-| 184 | invokestatic | yes | no | no |
-| 185 | invokeinterface | yes | no | no |
-| 186 | invokedynamic | yes | no | no |
-| 187 | new | yes | no | no |
-| 188 | newarray | yes | no | no |
-| 189 | anewarray | yes | no | no |
-| 190 | arraylength | yes | no | no |
-| 191 | athrow | yes | no | no |
-| 192 | checkcast | yes | no | no |
-| 193 | instanceof | yes | no | no |
-| 194 | monitorenter | yes | no | no |
-| 195 | monitorexit | yes | no | no |
-| 196 | wide | yes | yes | yes (278 sites) |
-| 197 | multianewarray | yes | no | no |
-| 198 | ifnull | yes | yes | yes (1 sites) |
+| 170 | tableswitch | yes | yes | yes (2 sites) |
+| 171 | lookupswitch | yes | yes | yes (3 sites) |
+| 172 | ireturn | yes | yes | yes (174 sites) |
+| 173 | lreturn | yes | yes | yes (44 sites) |
+| 174 | freturn | yes | yes | yes (12 sites) |
+| 175 | dreturn | yes | yes | yes (12 sites) |
+| 176 | areturn | yes | yes | yes (16 sites) |
+| 177 | return | yes | yes | yes (2 sites) |
+| 178 | getstatic | yes | partial: loaded classes; JDK static fields with a model (Boolean.TRUE/FALSE) | yes (10 sites) |
+| 179 | putstatic | yes | yes | yes (4 sites) |
+| 180 | getfield | yes | yes | yes (12 sites) |
+| 181 | putfield | yes | yes | yes (7 sites) |
+| 182 | invokevirtual | yes | partial: loaded classes + JDK methods that have a model (TRUST.md) | yes (75 sites) |
+| 183 | invokespecial | yes | partial: as invokevirtual | yes (25 sites) |
+| 184 | invokestatic | yes | partial: as invokevirtual | yes (65 sites) |
+| 185 | invokeinterface | yes | partial: as invokevirtual; default methods; lambda objects | yes (13 sites) |
+| 186 | invokedynamic | yes | partial: javac string concatenation (StringConcatFactory) and lambdas/method refs (LambdaMetafactory.metafactory, except Foo::new); altMetafactory, records, switch patterns not yet | yes (15 sites) |
+| 187 | new | yes | yes | yes (25 sites) |
+| 188 | newarray | yes | yes | yes (22 sites) |
+| 189 | anewarray | yes | yes | yes (11 sites) |
+| 190 | arraylength | yes | yes | yes (29 sites) |
+| 191 | athrow | yes | yes | yes (9 sites) |
+| 192 | checkcast | yes | yes | yes (9 sites) |
+| 193 | instanceof | yes | yes | yes (8 sites) |
+| 194 | monitorenter | yes | partial: single thread: entry counts only (threads: Track C) | yes (2 sites) |
+| 195 | monitorexit | yes | partial: as monitorenter | yes (4 sites) |
+| 196 | wide | yes | yes | yes (280 sites) |
+| 197 | multianewarray | yes | yes | yes (2 sites) |
+| 198 | ifnull | yes | yes | yes (2 sites) |
 | 199 | ifnonnull | yes | yes | yes (1 sites) |
 | 200 | goto_w | yes | yes | yes (2 sites) |
 | 201 | jsr_w | yes | no | no |

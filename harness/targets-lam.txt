@@ -1,0 +1,15 @@
+classes/corpus5 org.rocqjvm.corpus5.Lam nonCapturing (II)I
+classes/corpus5 org.rocqjvm.corpus5.Lam capturing (II)I
+classes/corpus5 org.rocqjvm.corpus5.Lam sameLambda (I)Z
+classes/corpus5 org.rocqjvm.corpus5.Lam staticIface (II)I
+classes/corpus5 org.rocqjvm.corpus5.Lam methodRefs (I)I
+classes/corpus5 org.rocqjvm.corpus5.Lam boxedLambda (I)I
+classes/corpus5 org.rocqjvm.corpus5.Lam boxing (IJ)I
+classes/corpus5 org.rocqjvm.corpus5.Lam unbox (I)I
+classes/corpus5 org.rocqjvm.corpus5.Lam multi (II)I
+classes/corpus5 org.rocqjvm.corpus5.Lam multiNeg (I)I
+classes/corpus5 org.rocqjvm.corpus5.Lam badInit (I)I fresh
+classes/corpus5 org.rocqjvm.corpus5.Lam badTwice (I)I fresh
+classes/corpus5 org.rocqjvm.corpus5.Lam badArray (I)I fresh
+classes/corpus5 org.rocqjvm.corpus5.Lam enumSwitch (I)I
+classes/corpus5 org.rocqjvm.corpus5.Lam predicates (I)I

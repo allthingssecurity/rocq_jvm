@@ -53,7 +53,10 @@ Inductive object : Type :=
 | OArr (elt : jtype) (elems : list value)
 | OStr (u : list Z)          (** java.lang.String: its UTF-16 code units (immutable) *)
 | OSb (u : list Z)           (** java.lang.StringBuilder: its current code units *)
-| OCls (name : string).      (** java.lang.Class object of a class (internal name or descriptor) *)
+| OCls (name : string)       (** java.lang.Class object of a class (internal name or descriptor) *)
+| OLam (iface sam : string) (kind : Z) (impl : methodref) (cap : list value).
+   (** object made by LambdaMetafactory: functional interface, its method name,
+       the implementation method handle (kind, method) and the captured values *)
 
 Definition heap := Z -> option object.
 Definition upd {A} (h : Z -> option A) (l : Z) (o : A) : Z -> option A :=
@@ -117,6 +120,17 @@ Definition builtin_super (c : string) : option (option string) :=
   else if String.eqb c "java/util/NoSuchElementException" then RE
   else if String.eqb c "java/util/ConcurrentModificationException" then RE
   else if String.eqb c "java/lang/CloneNotSupportedException" then Some (Some "java/lang/Exception")
+  else if String.eqb c "java/lang/LinkageError" then Some (Some "java/lang/Error")
+  else if String.eqb c "java/lang/ExceptionInInitializerError" then Some (Some "java/lang/LinkageError")
+  else if String.eqb c "java/lang/NoClassDefFoundError" then Some (Some "java/lang/LinkageError")
+  else if String.eqb c "java/lang/VirtualMachineError" then Some (Some "java/lang/Error")
+  else if String.eqb c "java/lang/StackOverflowError" then Some (Some "java/lang/VirtualMachineError")
+  else if String.eqb c "java/lang/OutOfMemoryError" then Some (Some "java/lang/VirtualMachineError")
+  else if String.eqb c "java/lang/AssertionError" then Some (Some "java/lang/Error")
+  else if String.eqb c "java/lang/Number" then Some (Some "java/lang/Object")
+  else if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Short"
+          || String.eqb c "java/lang/Byte" then Some (Some "java/lang/Number")
+  else if String.eqb c "java/lang/Boolean" || String.eqb c "java/lang/Character" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/String" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/AbstractStringBuilder" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/StringBuilder" then Some (Some "java/lang/AbstractStringBuilder")
@@ -212,6 +226,7 @@ Definition runtime_type (o : object) : jtype :=
   | OObj c _ => TRef c | OArr e _ => TArr e
   | OStr _ => TRef "java/lang/String" | OSb _ => TRef "java/lang/StringBuilder"
   | OCls _ => TRef "java/lang/Class"
+  | OLam i _ _ _ _ => TRef i
   end.
 
 (** ** Defaults and field declarations *)
@@ -370,7 +385,23 @@ Fixpoint unwind (p : program) (s : mstate) (exn : Z) (t : jtype) (fs : list cfra
     | Some (Some hpc) =>
         MNext (with_frames s (set_resume (set_frame c (mkframe hpc [VRef exn] (f_locals f))) None :: rest))
     | Some None =>
-        if cf_clinit c then MStuck "exception escapes <clinit> (ExceptionInInitializerError: Phase 9)"
+        if cf_clinit c then
+          (* JVMS 5.5 step 11: the class becomes erroneous; an Error propagates as is,
+             any other exception is wrapped in ExceptionInInitializerError and thrown
+             at the instruction that triggered the initialisation. *)
+          let s1 := {| ms_heap := ms_heap s; ms_next := ms_next s;
+                       ms_statics := ("#err:" ++ cf_class c, VInt 1) :: ms_statics s;
+                       ms_inited := ms_inited s; ms_locks := ms_locks s; ms_frames := ms_frames s |} in
+          match subclass p 64 (match t with TRef n => n | _ => "" end) "java/lang/Error" with
+          | Some true => unwind p s1 exn t rest
+          | Some false =>
+              let l := ms_next s1 in
+              let s2 := {| ms_heap := upd (ms_heap s1) l (OObj "java/lang/ExceptionInInitializerError" nil);
+                           ms_next := l + 1; ms_statics := ms_statics s1; ms_inited := ms_inited s1;
+                           ms_locks := ms_locks s1; ms_frames := ms_frames s1 |} in
+              unwind p s2 l (TRef "java/lang/ExceptionInInitializerError") rest
+          | None => MStuck "exception in <clinit>: cannot decide whether it is an Error"
+          end
         else unwind p s exn t rest
     end
   end.
@@ -389,6 +420,18 @@ Definition NPE := "java/lang/NullPointerException".
 Definition AIOOBE := "java/lang/ArrayIndexOutOfBoundsException".
 
 (** ** Class initialisation (JVMS 5.5, single thread). *)
+(** A class whose <clinit> failed is erroneous: later uses throw NoClassDefFoundError. *)
+Fixpoint erroneous (p : program) (fuel : nat) (statics : list (string * value)) (c : string) : bool :=
+  match fuel with
+  | O => false
+  | S k => match assoc ("#err:" ++ c) statics with
+           | Some _ => true
+           | None => match find_class p c with
+                     | Some cf => match cf_super cf with Some sup => erroneous p k statics sup | None => false end
+                     | None => false
+                     end
+           end
+  end.
 (** The outermost loaded superclass of [c] (or [c] itself) whose
     initialisation has not started; [None] if none (all started or not loaded). *)
 Fixpoint init_needed (p : program) (fuel : nat) (inited : list string) (c : string) : option classfile :=
@@ -723,6 +766,149 @@ Definition concat_units (h : heap) (recipe : list Z) (consts : list (list Z)) (p
            (args : list value) : string + list Z :=
   concat_go (S (length recipe)) h recipe consts ps args.
 
+(** ** Method invocation (shared by invoke* and by calls through lambda objects).
+    [args] are the popped arguments (receiver first), [r] the rest of the
+    caller's operand stack, [nx] the pc after the invoke. *)
+Definition invoke_kind_of_ref (kind : Z) : option invoke_kind :=
+  if kind =? 6 then Some InvStatic        (* REF_invokeStatic *)
+  else if kind =? 5 then Some InvVirtual  (* REF_invokeVirtual *)
+  else if kind =? 9 then Some InvInterface
+  else if kind =? 7 then Some InvSpecial  (* REF_invokeSpecial: private instance methods *)
+  else None.                              (* REF_newInvokeSpecial (Foo::new): not yet *)
+
+Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
+         (k : invoke_kind) (mr : methodref) (args r : list value) (nx : pc) : mstep :=
+  let c := cf_code top in
+  let f := cf_frame top in
+  let lv := f_locals f in
+  let h := ms_heap s in
+  let go st' s' :=
+      if stack_slots st' <=? c_max_stack c
+      then MNext (with_frames s' (set_frame top (mkframe nx st' lv) :: rest))
+      else MStuck "operand stack overflow (max_stack)" in
+  let caller := set_frame top (mkframe (f_pc f) r lv) in
+  let run_model cls :=
+      match mdl cls (mr_name mr) (mr_desc mr) args s with
+      | MOk v s' => go (match v with Some w => w :: r | None => r end) (with_frames s' (ms_frames s))
+      | MThrow cn => throw_new p s cn
+      | MStuckModel why => MStuck why
+      | MNoModel => MStuck ("no model for " ++ cls ++ "." ++ mr_name mr ++ mr_desc mr)
+      end in
+  match k with
+  | InvStatic =>
+      if erroneous p 64 (ms_statics s) (mr_class mr) then throw_new p s "java/lang/NoClassDefFoundError" else
+      match init_needed p 64 (ms_inited s) (mr_class mr) with
+      | Some cf => start_init s cf
+      | None =>
+        match resolve_full p (mr_class mr) (mr_name mr) (mr_desc mr) with
+        | Some (cn, m) =>
+            if Z.testbit (m_access m) 8 then run_model cn
+            else enter s caller rest cn m args nx
+        | None => run_model (mr_class mr)
+        end
+      end
+  | InvSpecial | InvVirtual | InvInterface =>
+      match args with
+      | VNull :: _ => throw_new p s NPE
+      | VRef l :: more =>
+          match h l with
+          | Some (OLam iface sam kind impl cap) =>
+              if negb (match k with InvSpecial => true | _ => false end) && String.eqb (mr_name mr) sam then
+                match fuel, invoke_kind_of_ref kind with
+                | S fu, Some k' => do_invoke fu p mdl s top rest k' impl (app cap more) r nx
+                | _, None => MStuck "lambda: constructor references are not modelled yet"
+                | O, _ => MStuck "lambda: nesting"
+                end
+              else
+                (* another method on a lambda object: a default method of a loaded interface *)
+                match resolve_full p iface (mr_name mr) (mr_desc mr) with
+                | Some (cn, m) => enter s caller rest cn m args nx
+                | None => MStuck ("method " ++ mr_name mr ++ " on a lambda object is not modelled")
+                end
+          | ho =>
+          let start := match k with
+                       | InvSpecial => Some (mr_class mr)
+                       | _ => match ho with
+                              | Some (OObj cn _) => Some cn
+                              | Some (OArr _ _) => Some "java/lang/Object"
+                              | Some (OStr _) => Some "java/lang/String"
+                              | Some (OSb _) => Some "java/lang/StringBuilder"
+                              | Some (OCls _) => Some "java/lang/Class"
+                              | Some (OLam i _ _ _ _) => Some i
+                              | None => None
+                              end
+                       end in
+          match start with
+          | None => MStuck "invoke: dangling receiver"
+          | Some cn0 =>
+            match resolve_full p cn0 (mr_name mr) (mr_desc mr) with
+            | Some (cn, m) =>
+                if Z.testbit (m_access m) 8 then run_model cn
+                else enter s caller rest cn m args nx
+            | None =>
+                (* not in a loaded class: the model of the first JDK class on the
+                   receiver's superclass chain (e.g. java/lang/Enum for an enum), else
+                   the model of the method as declared *)
+                let jc := first_unloaded p 64 cn0 in
+                match mdl jc (mr_name mr) (mr_desc mr) args s with
+                | MNoModel => run_model (mr_class mr)
+                | _ => run_model jc
+                end
+            end
+          end
+          end
+      | _ => MStuck "invoke: receiver is not a reference"
+      end
+  end.
+
+(** The implementation method of a LambdaMetafactory.metafactory call site. *)
+Definition lambda_site (cf : classfile) (bi : Z) : option (Z * methodref) :=
+  let* bms := bootstrap_methods cf in
+  let* (mh, args) := nth_z bms bi in
+  match cp_get (cf_cp cf) mh with
+  | Some (CPMethodHandle _ ref) =>
+      let* m := cp_methodref (cf_cp cf) ref in
+      if String.eqb (mr_class m) "java/lang/invoke/LambdaMetafactory" && String.eqb (mr_name m) "metafactory" then
+        match args with
+        | _ :: impl :: _ :: nil =>
+            match cp_get (cf_cp cf) impl with
+            | Some (CPMethodHandle kind iref) => let* im := cp_methodref (cf_cp cf) iref in Some (kind, im)
+            | _ => None
+            end
+        | _ => None
+        end
+      else None
+  | _ => None
+  end.
+
+(** multianewarray: nested arrays for the given counts (outermost first). *)
+Fixpoint multi_alloc (fuel : nat) (s : mstate) (t : jtype) (counts : list Z) : option (Z * mstate) :=
+  match fuel with
+  | O => None
+  | S k =>
+    match t, counts with
+    | TArr e, [n] =>
+        Some (alloc s (OArr e (repeat (default_of e) (Z.to_nat n))))
+    | TArr e, n :: more =>
+        let fix kids (m : nat) (s : mstate) : option (list value * mstate) :=
+          match m with
+          | O => Some (nil, s)
+          | S m' => match multi_alloc k s e more with
+                    | Some (l, s1) => match kids m' s1 with
+                                      | Some (ls, s2) => Some (VRef l :: ls, s2)
+                                      | None => None
+                                      end
+                    | None => None
+                    end
+          end in
+        match kids (Z.to_nat n) s with
+        | Some (ls, s1) => Some (alloc s1 (OArr e ls))
+        | None => None
+        end
+    | _, _ => None
+    end
+  end.
+
 (** ** One machine step *)
 Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
   match ms_frames s with
@@ -744,6 +930,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
     match i with
     (* ---- objects ---- *)
     | New cn =>
+        if erroneous p 64 (ms_statics s) cn then throw_new p s "java/lang/NoClassDefFoundError" else
         match init_needed p 64 (ms_inited s) cn with
         | Some cf => start_init s cf
         | None =>
@@ -785,15 +972,27 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         | _, _ => MStuck "putfield: operand"
         end
     | Getstatic fr =>
+        if erroneous p 64 (ms_statics s) (fr_class fr) then throw_new p s "java/lang/NoClassDefFoundError" else
         match init_needed p 64 (ms_inited s) (fr_class fr) with
         | Some cf => start_init s cf
         | None =>
           match assoc (static_key (fr_class fr) (fr_name fr)) (ms_statics s) with
           | Some v => go (v :: st) s
-          | None => MStuck "getstatic: field of a class that is not loaded, or inherited static"
+          | None =>
+              (* a static field of a JDK class: its model, as a pseudo-method "<get>name" *)
+              match find_class p (fr_class fr) with
+              | None => match mdl (fr_class fr) ("<get>" ++ fr_name fr) (fr_desc fr) nil s with
+                        | MOk (Some v) s' => go (v :: st) (with_frames s' (ms_frames s))
+                        | MThrow cn => throw_new p s cn
+                        | MStuckModel why => MStuck why
+                        | _ => MStuck ("no model for the static field " ++ fr_class fr ++ "." ++ fr_name fr)
+                        end
+              | Some _ => MStuck "getstatic: inherited static field (resolution through superclasses not modelled yet)"
+              end
           end
         end
     | Putstatic fr =>
+        if erroneous p 64 (ms_statics s) (fr_class fr) then throw_new p s "java/lang/NoClassDefFoundError" else
         match init_needed p 64 (ms_inited s) (fr_class fr) with
         | Some cf => start_init s cf
         | None =>
@@ -944,64 +1143,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
           let nargs := (length ps + (match k with InvStatic => 0 | _ => 1 end))%nat in
           match pop_n nargs st with
           | None => MStuck "invoke: operand stack"
-          | Some (args, r) =>
-            let caller := set_frame top (mkframe (f_pc f) r lv) in
-            let run_model cls :=
-                match mdl cls (mr_name mr) (mr_desc mr) args s with
-                | MOk v s' =>
-                    go (match v with Some w => w :: r | None => r end) (with_frames s' (ms_frames s))
-                | MThrow cn => throw_new p s cn
-                | MStuckModel why => MStuck why
-                | MNoModel => MStuck ("no model for " ++ cls ++ "." ++ mr_name mr ++ mr_desc mr)
-                end in
-            match k with
-            | InvStatic =>
-                match init_needed p 64 (ms_inited s) (mr_class mr) with
-                | Some cf => start_init s cf
-                | None =>
-                  match resolve_full p (mr_class mr) (mr_name mr) (mr_desc mr) with
-                  | Some (cn, m) =>
-                      if Z.testbit (m_access m) 8 then run_model cn
-                      else enter s caller rest cn m args nx
-                  | None => run_model (mr_class mr)
-                  end
-                end
-            | InvSpecial | InvVirtual | InvInterface =>
-                match args with
-                | VNull :: _ => throw_new p s NPE
-                | VRef l :: _ =>
-                    let start := match k with
-                                 | InvSpecial => Some (mr_class mr)
-                                 | _ => match h l with
-                                        | Some (OObj cn _) => Some cn
-                                        | Some (OArr _ _) => Some "java/lang/Object"
-                                        | Some (OStr _) => Some "java/lang/String"
-                                        | Some (OSb _) => Some "java/lang/StringBuilder"
-                                        | Some (OCls _) => Some "java/lang/Class"
-                                        | None => None
-                                        end
-                                 end in
-                    match start with
-                    | None => MStuck "invoke: dangling receiver"
-                    | Some cn0 =>
-                      match resolve_full p cn0 (mr_name mr) (mr_desc mr) with
-                      | Some (cn, m) =>
-                          if Z.testbit (m_access m) 8 then run_model cn
-                          else enter s caller rest cn m args nx
-                      | None =>
-                          (* not in a loaded class: the model of the first JDK class on the
-                             receiver's superclass chain (e.g. java/lang/Enum for an enum), else
-                             the model of the method as declared *)
-                          let jc := first_unloaded p 64 cn0 in
-                          match mdl jc (mr_name mr) (mr_desc mr) args s with
-                          | MNoModel => run_model (mr_class mr)
-                          | _ => run_model jc
-                          end
-                      end
-                    end
-                | _ => MStuck "invoke: receiver is not a reference"
-                end
-            end
+          | Some (args, r) => do_invoke 8 p mdl s top rest k mr args r nx
           end
         end
     (* ---- String and Class constants (interned: one object per value) ---- *)
@@ -1026,8 +1168,47 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                   end
               | None => MStuck "invokedynamic: operand stack"
               end
-          | _, _ => MStuck "invokedynamic: only StringConcatFactory.makeConcatWithConstants is modelled (lambdas: Phase 9)"
+          | _, Some (ps, Some (TRef iface)) =>
+              match lambda_site cf bi with
+              | Some (kind, impl) =>
+                  match pop_n (length ps) st with
+                  | Some (cap, r) =>
+                      let o := OLam iface name kind impl cap in
+                      (* non-capturing lambdas are one object per call site *)
+                      let (l, s') := match cap with
+                                     | nil => let key := "#lam:" ++ cf_class top ++ "#" ++ intern_key (OStr (z_units bi)) in
+                                              match assoc key (ms_statics s) with
+                                              | Some (VRef l0) => (l0, s)
+                                              | _ => let (l0, s0) := alloc s o in
+                                                     (l0, {| ms_heap := ms_heap s0; ms_next := ms_next s0;
+                                                             ms_statics := (key, VRef l0) :: ms_statics s0;
+                                                             ms_inited := ms_inited s0; ms_locks := ms_locks s0;
+                                                             ms_frames := ms_frames s0 |})
+                                              end
+                                     | _ => alloc s o
+                                     end in
+                      go (VRef l :: r) s'
+                  | None => MStuck "invokedynamic: operand stack"
+                  end
+              | None => MStuck "invokedynamic: bootstrap method not modelled (only string concatenation and LambdaMetafactory.metafactory)"
+              end
+          | _, _ => MStuck "invokedynamic: bootstrap method not modelled"
           end
+        end
+    | Multianewarray cn dims =>
+        match pop_n (Z.to_nat dims) st with
+        | Some (counts, r) =>
+            if negb (forallb (fun v => match v with VInt _ => true | _ => false end) counts)
+            then MStuck "multianewarray: operand" else
+            let ns := map (fun v => match v with VInt n => n | _ => 0 end) counts in
+            if existsb (fun n => n <? 0) ns then throw_new p s "java/lang/NegativeArraySizeException"
+            else if existsb (fun n => MAX_ARRAY <? n) ns || (MAX_ARRAY <? fold_left Z.mul ns 1)
+            then MStuck "array larger than the model bound (OutOfMemoryError possible)"
+            else match multi_alloc 256 s (class_type cn) ns with
+                 | Some (l, s') => go (VRef l :: r) s'
+                 | None => MStuck "multianewarray: type"
+                 end
+        | None => MStuck "multianewarray: operand stack"
         end
     (* ---- everything else: the Phase 1 frame-local semantics ---- *)
     | _ =>
@@ -1119,7 +1300,8 @@ Definition call_static (p : program) (mdl : model) (fuel : nat) (cls name desc :
 Definition exn_class (s : mstate) (l : Z) : string :=
   match ms_heap s l with
   | Some (OObj c _) => c | Some (OArr _ _) => "<array>" | Some (OStr _) => "java/lang/String"
-  | Some (OSb _) => "java/lang/StringBuilder" | Some (OCls _) => "java/lang/Class" | None => "<dangling>"
+  | Some (OSb _) => "java/lang/StringBuilder" | Some (OCls _) => "java/lang/Class"
+  | Some (OLam i _ _ _ _) => i | None => "<dangling>"
   end.
 
 Definition load_program (files : list (list Z)) : option program :=
