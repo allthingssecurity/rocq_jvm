@@ -153,7 +153,7 @@ Lemma do_invoke_string_model : forall p mdl s top rest k mr l u more r nx v s',
 Proof.
   intros p mdl s top rest k mr l u more r nx v s' Hk Hh Hr Hu Hm st' Hb.
   assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest k mr l more (ms_heap s l) r nx)
     by (destruct Hk as [-> | ->]; reflexivity).
   rewrite E, Hh. unfold invoke_obj.
@@ -253,7 +253,8 @@ Lemma mstep_aastore_ref : forall s top rest nx vl i l r e es o cname,
 Proof.
   intros s top rest nx vl i l r e es o cname Hfr Hf Hst Hh Hk Hr Ho Hc Ha Hb.
   unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk. cbn [negb]. rewrite Hr, Ho.
-  rewrite Hc, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+  rewrite Hc. assert (Ho' : obj_assignable p o cname = Some true) by (unfold obj_assignable; rewrite Ha; reflexivity).
+  rewrite Ho'. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
 
 Lemma mstep_new : forall s top rest cn nx fs,
@@ -294,7 +295,7 @@ Lemma do_invoke_obj_enter : forall s top rest k mr l more r nx cls fs cn m,
 Proof.
   intros s top rest k mr l more r nx cls fs cn m Hk Hh Hr Hn.
   assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest k mr l more (ms_heap s l) r nx)
     by (destruct Hk as [-> | ->]; reflexivity).
   rewrite E, Hh. unfold invoke_obj. destruct Hk as [-> | ->]; rewrite Hr, Hn; reflexivity.
@@ -310,7 +311,7 @@ Lemma do_invoke_special_enter : forall s top rest mr l more r nx o cn m,
 Proof.
   intros s top rest mr l more r nx o cn m Hh Ho Hr Hn.
   assert (E : do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest InvSpecial mr l more (ms_heap s l) r nx) by reflexivity.
   rewrite E, Hh. unfold invoke_obj. destruct o; try discriminate Ho; rewrite Hr, Hn; reflexivity.
 Qed.
@@ -397,7 +398,7 @@ Lemma do_invoke_unloaded_model : forall s top rest k mr l more r nx cls fs v s',
 Proof.
   intros s top rest k mr l more r nx cls fs v s' Hk Hh Hr Hu Hm st' Hb.
   assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest k mr l more (ms_heap s l) r nx)
     by (destruct Hk as [-> | ->]; reflexivity).
   rewrite E, Hh. unfold invoke_obj.
@@ -442,7 +443,7 @@ Lemma do_invoke_special_model : forall s top rest mr l more r nx o v s',
 Proof.
   intros s top rest mr l more r nx o v s' Hh Ho Hr Hu Hm st' Hb.
   assert (E : do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest InvSpecial mr l more (ms_heap s l) r nx) by reflexivity.
   rewrite E, Hh. unfold invoke_obj. destruct o; try discriminate Ho;
   rewrite Hr, Hu, Hm; unfold invoke_run_model; rewrite Hm; unfold invoke_frame_go; subst st'; rewrite Hb; reflexivity.

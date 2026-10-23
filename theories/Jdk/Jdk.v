@@ -673,6 +673,7 @@ Definition jdk_model (p : program) (e : jenv) : model :=
        && (String.eqb desc "()V" || String.eqb desc "(Ljava/lang/String;)V"
            || String.eqb desc "(Ljava/lang/String;Ljava/lang/Throwable;)V"
            || String.eqb desc "(Ljava/lang/Throwable;)V") then MOk None s
+    else if String.eqb cls "java/lang/Record" && String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
     else if String.eqb cls "java/lang/Object" then
       if String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
       else object_model name desc args s

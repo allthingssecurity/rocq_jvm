@@ -43,6 +43,8 @@ a user object in string concatenation), identity hash codes.
 | `Lam` (lambdas, method refs, boxing caches, multianewarray, EIIE/NCDFE, enum switch) | 15 | 10,000 (in progress; 300 earlier: 0) | 0 |
 | `Fld` (corpus6: inherited/shadowed static and instance fields, interface fields, init order incl. superinterfaces with defaults, circular and erroneous initialisation, inherited static methods, enum with `name`/`ordinal` fields) | 11 | 2,000 | 0 |
 | `Sel` (corpus7: private methods incl. nestmates and private interface methods, maximally-specific defaults, package-private overriding across packages incl. JVMS 5.4.5 (b), super calls; classes recompiled separately: ICCE / AME / NoSuchMethodError / NoSuchFieldError, resolution before the null check) | 8 | 2,000 | 0 (172 of 2,000 inputs of `changed`/`changedCaught` are `STUCK` by design: the JVMS/HotSpot divergence below) |
+| `Indy` (corpus8, `--release 21`: `Foo::new` incl. initialisation and failing `<clinit>`, altMetafactory serializable/marker lambdas, record toString/equals/hashCode incl. float/double, NaN, -0.0, nulls and boxes, typeSwitch with Class/String/Integer labels and record patterns, sealed switch, enumSwitch) | 14 | 2,000 | 0 |
+| `Boxes` (corpus10: instanceof / checkcast / aastore of boxes, String, StringBuilder, enums into Serializable[] / Comparable[] / Constable[] / ConstantDesc[] / CharSequence[] / Number[], mixed varargs) | 4 | 2,000 | 0 |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
 | camel-wal whole class (`WalScenario`: TransactionLog + LayerInfo + EntryContainer + LogEntry + EntryState) main + fix | 2 | 4,516 scenarios | 0 |
@@ -107,6 +109,25 @@ Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-i
   non-static method are initialised in JVMS order (a pending `<clinit>` frame at pc -1); an exception through a pending
   frame marks that class erroneous.
 
+## invokedynamic (JDK 21 bootstrap methods)
+- `LambdaMetafactory.metafactory` and `altMetafactory` (flags serializable / markers / bridges: the lambda object also
+  implements the marker interfaces and java.io.Serializable; bridges are further descriptors of the same name),
+  implementation kinds static / virtual / interface / special and **REF_newInvokeSpecial** (`Foo::new`: initialises
+  Foo when the handle is invoked, allocates, runs the constructor, returns the object); arguments are unboxed to the
+  implementation's primitive parameters (null: NullPointerException).
+- `ObjectMethods.bootstrap` (records): `toString` = `getSimpleName()` (InnerClasses inner name, else the name after the
+  last '/') + `[a=..., b=...]` with String.valueOf of each component (primitives, null, Strings, boxes), `hashCode` =
+  fold `31 * h + hash(c)` (Integer/Long/.../Float/Double/Boolean.hashCode, Objects.hashCode), `equals` = same object,
+  else `isInstance` and the components compared last to first (Float/Double.compare == 0, Objects.equals) — the
+  structure of JDK 21's `ObjectMethods`.
+- `SwitchBootstraps.typeSwitch` / `enumSwitch` as implemented in JDK 21.0.12 (`createMethodHandleSwitch`):
+  `Objects.checkIndex(restart, n + 1)`, null -> -1, then the first label from `restart` that matches: Class
+  (`isInstance`), Integer (Number/Character value), String (`Objects.equals`), enum constant name (same declaring
+  enum class and the constant itself); none -> n.
+- The JDK classes not loaded by the machine now know their JDK 21 superinterfaces (boxes, Number, String,
+  StringBuilder, Class, Enum, the JdkTables.v classes): e.g. an Integer is Serializable / Comparable / Constable /
+  ConstantDesc, so `Serializable[]` from mixed varargs accepts it (was a wrong ArrayStoreException).
+
 ## Proof infrastructure
 - `Core/Tactics.v`: symbolic execution of the frame interpreter (`symex`), used for int-only methods.
 - `Core/Logic.v` (statement change, 2026-10-24): `mstep_getfield` / `mstep_putfield` now take `obj_get p fr fs = Some v` /
@@ -122,7 +143,12 @@ Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-i
   model calls as lemmas proved with `cbv`, one tactic per instruction kind, loop proofs by induction.
 
 ## Not done yet / known limitations
-- `jsr`/`ret` (not needed), dynamic constants, `Foo::new`, `altMetafactory`, switch-pattern and record bootstraps.
+- `jsr`/`ret` (not needed), dynamic constants (condy; e.g. `EnumDesc` labels of a pattern switch over a sealed type
+  with qualified enum constants are `STUCK`).
+- invokedynamic: lambdas whose implementation needs boxing, widening or a return-value conversion/drop (e.g.
+  `Supplier<Integer> s = this::intMethod`) are `STUCK` (unboxing of arguments is modelled); record `toString` of
+  float/double components (Float/Double.toString) and of components that need `toString()`/`hashCode()`/`equals()`
+  of another object (a call back into bytecode) are `STUCK`; so are pattern-switch label tests that would call `equals()`.
 - invokeinterface where several maximally-specific default methods match: JVMS 6.5 says
   IncompatibleClassChangeError, HotSpot 21 throws AbstractMethodError (corpus7 `changed`, case 1): `STUCK` (no claim).
 - Access control (IllegalAccessError for private/protected/package access, putstatic to a final field outside

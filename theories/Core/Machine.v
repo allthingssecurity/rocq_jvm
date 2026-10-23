@@ -32,6 +32,7 @@
 
 From Stdlib Require Import ZArith String Ascii List Bool Lia.
 From JVM.Core Require Import Int Instr Desc Semantics JdkTables.
+From JVM.Core Require Float.
 From JVM.Loader Require Import ClassFile.
 Import ListNotations.
 Open Scope string_scope.
@@ -95,7 +96,9 @@ Fixpoint find_class (p : program) (n : string) : option classfile :=
 Definition builtin_interfaces : list string :=
   ["java/io/Serializable"; "java/lang/Comparable"; "java/lang/CharSequence"; "java/lang/Cloneable";
    "java/lang/Appendable"; "java/lang/constant/Constable"; "java/lang/constant/ConstantDesc";
-   "java/lang/Runnable"; "java/lang/AutoCloseable"; "java/lang/Iterable"].
+   "java/lang/Runnable"; "java/lang/AutoCloseable"; "java/lang/Iterable";
+   "java/lang/reflect/GenericDeclaration"; "java/lang/reflect/Type"; "java/lang/reflect/AnnotatedElement";
+   "java/lang/invoke/TypeDescriptor$OfField"; "java/lang/invoke/TypeDescriptor"].
 
 Definition builtin_super (c : string) : option (option string) :=
   let RE := Some (Some "java/lang/RuntimeException") in
@@ -135,7 +138,8 @@ Definition builtin_super (c : string) : option (option string) :=
   else if String.eqb c "java/lang/Record" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/Number" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Short"
-          || String.eqb c "java/lang/Byte" then Some (Some "java/lang/Number")
+          || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Double" || String.eqb c "java/lang/Float"
+       then Some (Some "java/lang/Number")
   else if String.eqb c "java/lang/Boolean" || String.eqb c "java/lang/Character" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/String" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/AbstractStringBuilder" then Some (Some "java/lang/Object")
@@ -148,7 +152,10 @@ Definition builtin_super (c : string) : option (option string) :=
 Definition super_of (p : program) (c : string) : option (option string) :=
   match find_class p c with
   | Some cf => Some (cf_super cf)
-  | None => builtin_super c
+  | None => match builtin_super c with
+            | Some x => Some x
+            | None => option_map ji_super (jdk_info c)
+            end
   end.
 
 Definition interfaces_of (p : program) (c : string) : list string :=
@@ -160,12 +167,25 @@ Definition interfaces_of (p : program) (c : string) : list string :=
        "java/lang/constant/Constable"; "java/lang/constant/ConstantDesc"]
     else if String.eqb c "java/lang/AbstractStringBuilder" then ["java/lang/Appendable"; "java/lang/CharSequence"]
     else if String.eqb c "java/lang/StringBuilder" then
-      ["java/io/Serializable"; "java/lang/Comparable"; "java/lang/CharSequence"]
+      ["java/lang/Appendable"; "java/io/Serializable"; "java/lang/Comparable"; "java/lang/CharSequence"]
     else if String.eqb c "java/lang/Enum" then
       ["java/lang/constant/Constable"; "java/lang/Comparable"; "java/io/Serializable"]
     else if String.eqb c "java/lang/Throwable" then ["java/io/Serializable"]
-    else if String.eqb c "java/lang/Class" then ["java/io/Serializable"]
-    else nil
+    else if String.eqb c "java/lang/Class" then
+      ["java/io/Serializable"; "java/lang/reflect/GenericDeclaration"; "java/lang/reflect/Type";
+       "java/lang/reflect/AnnotatedElement"; "java/lang/invoke/TypeDescriptor$OfField"; "java/lang/constant/Constable"]
+    (* JDK 21 declarations of the boxes and Number *)
+    else if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Double"
+            || String.eqb c "java/lang/Float" then
+      ["java/lang/Comparable"; "java/lang/constant/Constable"; "java/lang/constant/ConstantDesc"]
+    else if String.eqb c "java/lang/Short" || String.eqb c "java/lang/Byte" then
+      ["java/lang/Comparable"; "java/lang/constant/Constable"]
+    else if String.eqb c "java/lang/Character" || String.eqb c "java/lang/Boolean" then
+      ["java/io/Serializable"; "java/lang/Comparable"; "java/lang/constant/Constable"]
+    else if String.eqb c "java/lang/Number" then ["java/io/Serializable"]
+    else if String.eqb c "java/lang/reflect/GenericDeclaration" then ["java/lang/reflect/AnnotatedElement"]
+    else if String.eqb c "java/lang/invoke/TypeDescriptor$OfField" then ["java/lang/invoke/TypeDescriptor"]
+    else match jdk_info c with Some j => ji_ifaces j | None => nil end
   end.
 
 (** [subclass p fuel c d]: is class/interface [c] a subtype of class/interface [d]?
@@ -227,12 +247,44 @@ Fixpoint assignable (p : program) (fuel : nat) (src : jtype) (dst : string) : op
     end
   end.
 
+(** The interfaces of a lambda object: the functional interface, then the
+    marker interfaces of [LambdaMetafactory.altMetafactory], separated by ';'
+    (which cannot occur in a class name). *)
+Fixpoint split_semi (s : string) (cur : string) : list string :=
+  match s with
+  | EmptyString => [cur]
+  | String c r => if Ascii.eqb c ";"%char then cur :: split_semi r EmptyString
+                  else split_semi r (cur ++ String c EmptyString)
+  end.
+Definition lam_ifaces (i : string) : list string := split_semi i EmptyString.
+Definition lam_primary (i : string) : string := match lam_ifaces i with x :: _ => x | nil => i end.
+
 Definition runtime_type (o : object) : jtype :=
   match o with
   | OObj c _ => TRef c | OArr e _ => TArr e
   | OStr _ => TRef "java/lang/String" | OSb _ => TRef "java/lang/StringBuilder"
   | OCls _ => TRef "java/lang/Class"
-  | OLam i _ _ _ _ => TRef i
+  | OLam i _ _ _ _ => TRef (lam_primary i)
+  end.
+
+Definition is_box_name (c : string) : bool :=
+  String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Short"
+  || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character" || String.eqb c "java/lang/Boolean".
+
+(** Is the object [o] an instance of the class/array type [dst]? (lambda
+    objects also implement their marker interfaces) *)
+Definition obj_assignable (p : program) (o : object) (dst : string) : option bool :=
+  match assignable p 64 (runtime_type o) dst with
+  | Some true => Some true
+  | r => match o with
+         | OLam i _ _ _ _ =>
+             fold_left (fun acc c => match acc, subclass p 64 c dst with
+                                     | Some true, _ | _, Some true => Some true
+                                     | None, _ | _, None => None
+                                     | Some false, Some false => Some false
+                                     end) (lam_ifaces i) r
+         | _ => r
+         end
   end.
 
 (** ** Defaults and field declarations *)
@@ -1368,7 +1420,7 @@ Definition invoke_kind_of_ref (kind : Z) : option invoke_kind :=
   else if kind =? 5 then Some InvVirtual  (* REF_invokeVirtual *)
   else if kind =? 9 then Some InvInterface
   else if kind =? 7 then Some InvSpecial  (* REF_invokeSpecial: private instance methods *)
-  else None.                              (* REF_newInvokeSpecial (Foo::new): not yet *)
+  else None.                              (* REF_newInvokeSpecial (8): [invoke_obj] *)
 
 Definition invoke_frame_go (top : cframe) (rest : list cframe) (nx : pc) (st' : list value) (s' : mstate) : mstep :=
   if stack_slots st' <=? c_max_stack (cf_code top)
@@ -1385,9 +1437,54 @@ Definition invoke_run_model (p : program) (mdl : model) (s : mstate) (top : cfra
   | MNoModel => MStuck ("no model for " ++ cls ++ "." ++ mr_name mr ++ mr_desc mr)
   end.
 
+(** LambdaMetafactory's adaptation of the arguments to the implementation
+    method's parameter types: a box passed for a primitive parameter is unboxed
+    (null: NullPointerException).  Other conversions (boxing, widening, and a
+    return value that needs converting or dropping) are not modelled.
+    [Some (Some vs)] adapted values, [Some None] NullPointerException, [None] not modelled. *)
+Definition box_prim (c : string) : option jtype :=
+  if String.eqb c "java/lang/Integer" then Some TInt else if String.eqb c "java/lang/Long" then Some TLong
+  else if String.eqb c "java/lang/Short" then Some TShort else if String.eqb c "java/lang/Byte" then Some TByte
+  else if String.eqb c "java/lang/Character" then Some TChar else if String.eqb c "java/lang/Boolean" then Some TBool
+  else None.
+
+Definition is_prim (t : jtype) : bool := match t with TRef _ | TArr _ => false | _ => true end.
+
+Fixpoint lam_adapt (h : heap) (ts : list jtype) (vs : list value) : option (option (list value)) :=
+  match ts, vs with
+  | nil, nil => Some (Some nil)
+  | t :: ts', v :: vs' =>
+      let rest := lam_adapt h ts' vs' in
+      match is_prim t, v with
+      | true, VRef l =>
+          match h l with
+          | Some (OObj c [("value", w)]) =>
+              match box_prim c with
+              | Some bt => if String.eqb (type_desc bt) (type_desc t)
+                           then match rest with Some (Some ws) => Some (Some (w :: ws)) | r => r end
+                           else None
+              | None => None
+              end
+          | _ => None
+          end
+      | true, VNull => match rest with None => None | _ => Some None end
+      | true, _ => match rest with Some (Some ws) => Some (Some (v :: ws)) | r => r end
+      | false, (VRef _ | VNull) => match rest with Some (Some ws) => Some (Some (v :: ws)) | r => r end
+      | false, _ => None
+      end
+  | _, _ => None
+  end.
+
+Definition same_ret_kind (a b : option jtype) : bool :=
+  match a, b with
+  | None, None => true
+  | Some x, Some y => if is_prim x || is_prim y then String.eqb (type_desc x) (type_desc y) else true
+  | _, _ => false
+  end.
+
 (** Virtual / interface / special call on the object [ho] found at the receiver.
     [recur] performs a call through a lambda object (with less fuel). *)
-Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
+Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref -> list value -> mstep)
            (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
            (k : invoke_kind) (mr : methodref) (l : Z) (more : list value) (ho : option object)
            (r : list value) (nx : pc) : mstep :=
@@ -1397,12 +1494,41 @@ Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
   match ho with
   | Some (OLam iface sam kind impl cap) =>
       if negb (match k with InvSpecial => true | _ => false end) && String.eqb (mr_name mr) sam then
+        match parse_mdesc (mr_desc impl), parse_mdesc (mr_desc mr) with
+        | Some (ips, irt), Some (_, srt) =>
+        let ips' := if (kind =? 6) || (kind =? 8) then ips else TRef (mr_class impl) :: ips in
+        let irt' := if kind =? 8 then Some (TRef (mr_class impl)) else irt in
+        if negb (same_ret_kind irt' srt) then MStuck "lambda: return value conversion not modelled" else
+        match lam_adapt (ms_heap s) ips' (app cap more) with
+        | None => MStuck "lambda: argument conversion not modelled"
+        | Some None => throw_new p s NPE
+        | Some (Some args') =>
         match invoke_kind_of_ref kind with
-        | Some k' => recur k' impl (app cap more)
-        | None => MStuck "lambda: constructor references are not modelled yet"
+        | Some k' => recur s r k' impl args'
+        | None =>
+          if kind =? 8 then
+            (* REF_newInvokeSpecial (Foo::new): invoking the handle initialises
+               Foo (JVMS 5.5), allocates the object and runs the constructor; the
+               new object is the result (pushed below the constructor's frame,
+               as new/dup/invokespecial does). *)
+            let c := mr_class impl in
+            if erroneous p 64 (ms_statics s) c then throw_new p s "java/lang/NoClassDefFoundError" else
+            match init_needed p 64 (ms_inited s) c with
+            | Some _ => init_class p s c
+            | None =>
+              match instance_fields p 64 c with
+              | Some fs => let (l', s') := alloc s (OObj c fs) in
+                           recur s' (VRef l' :: r) InvSpecial impl (VRef l' :: args')
+              | None => MStuck "constructor reference: class not loaded and not modelled"
+              end
+            end
+          else MStuck "lambda: method handle kind not modelled"
+        end
+        end
+        | _, _ => MStuck "lambda: descriptor"
         end
       else
-        match resolve_full p iface (mr_name mr) (mr_desc mr) with
+        match resolve_full p (lam_primary iface) (mr_name mr) (mr_desc mr) with
         | Some (cn, m) => enter s caller rest cn m args nx
         | None => MStuck ("method " ++ mr_name mr ++ " on a lambda object is not modelled")
         end
@@ -1415,7 +1541,7 @@ Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
                         | Some (OStr _) => Some "java/lang/String"
                         | Some (OSb _) => Some "java/lang/StringBuilder"
                         | Some (OCls _) => Some "java/lang/Class"
-                        | Some (OLam i _ _ _ _) => Some i
+                        | Some (OLam i _ _ _ _) => Some (lam_primary i)
                         | None => None
                         end
                  end in
@@ -1519,9 +1645,9 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
           | RUnknown => throw_new p s NPE
           end
       | VRef l :: more =>
-          let recur k' impl args' :=
+          let recur s' r' k' impl args' :=
               match fuel with
-              | S fu => do_invoke fu p mdl s top rest k' impl args' r nx
+              | S fu => do_invoke fu p mdl s' top rest k' impl args' r' nx
               | O => MStuck "lambda: nesting"
               end in
           invoke_obj recur p mdl s top rest k mr l more (ms_heap s l) r nx
@@ -1529,24 +1655,358 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
       end
   end.
 
-(** The implementation method of a LambdaMetafactory.metafactory call site. *)
-Definition lambda_site (cf : classfile) (bi : Z) : option (Z * methodref) :=
+(** The bootstrap method and static arguments of an invokedynamic call site. *)
+Definition bsm_site (cf : classfile) (bi : Z) : option (methodref * list Z) :=
   let* bms := bootstrap_methods cf in
   let* (mh, args) := nth_z bms bi in
   match cp_get (cf_cp cf) mh with
-  | Some (CPMethodHandle _ ref) =>
-      let* m := cp_methodref (cf_cp cf) ref in
-      if String.eqb (mr_class m) "java/lang/invoke/LambdaMetafactory" && String.eqb (mr_name m) "metafactory" then
-        match args with
-        | _ :: impl :: _ :: nil =>
-            match cp_get (cf_cp cf) impl with
-            | Some (CPMethodHandle kind iref) => let* im := cp_methodref (cf_cp cf) iref in Some (kind, im)
-            | _ => None
-            end
-        | _ => None
-        end
-      else None
+  | Some (CPMethodHandle _ ref) => let* m := cp_methodref (cf_cp cf) ref in Some (m, args)
   | _ => None
+  end.
+
+Definition is_bsm (m : methodref) (c n : string) : bool := String.eqb (mr_class m) c && String.eqb (mr_name m) n.
+
+(** The implementation method (kind, method) and the marker interfaces of a
+    LambdaMetafactory.metafactory / altMetafactory call site.  altMetafactory's
+    flags: 1 serializable (the object also implements java.io.Serializable),
+    2 markers (count, interfaces), 4 bridges (count, method types: further
+    descriptors of the same method name, which calls by name already cover). *)
+Definition lambda_site (cf : classfile) (bi : Z) : option (Z * methodref * list string) :=
+  let* (m, args) := bsm_site cf bi in
+  let impl_of (i : Z) := match cp_get (cf_cp cf) i with
+                         | Some (CPMethodHandle kind iref) => let* im := cp_methodref (cf_cp cf) iref in Some (kind, im)
+                         | _ => None
+                         end in
+  if is_bsm m "java/lang/invoke/LambdaMetafactory" "metafactory" then
+    match args with
+    | _ :: impl :: _ :: nil => let* (kind, im) := impl_of impl in Some (kind, im, nil)
+    | _ => None
+    end
+  else if is_bsm m "java/lang/invoke/LambdaMetafactory" "altMetafactory" then
+    match args with
+    | _ :: impl :: _ :: fl :: rest =>
+        let* (kind, im) := impl_of impl in
+        let* flags := match cp_get (cf_cp cf) fl with Some (CPInt z) => Some z | _ => None end in
+        let* markers :=
+          (if Z.testbit flags 1 then
+             match rest with
+             | n :: ms => match cp_get (cf_cp cf) n with
+                          | Some (CPInt k) => map_opt (cp_class (cf_cp cf)) (firstn (Z.to_nat k) ms)
+                          | _ => None
+                          end
+             | nil => None
+             end
+           else Some nil) in
+        Some (kind, im, app markers (if Z.testbit flags 0 then ["java/io/Serializable"] else nil))
+    | _ => None
+    end
+  else None.
+
+(** ** java.lang.runtime.ObjectMethods.bootstrap (records' toString, equals, hashCode). *)
+Fixpoint split_units (u : list Z) (cur : list Z) : list (list Z) :=
+  match u with
+  | nil => [rev cur]
+  | c :: r => if c =? 59 then rev cur :: split_units r nil else split_units r (c :: cur)
+  end.
+
+(** (record class, component names, component fields) *)
+Definition record_site (cf : classfile) (args : list Z) : option (string * list (list Z) * list fieldref) :=
+  match args with
+  | ci :: ni :: gs =>
+      let* rc := cp_class (cf_cp cf) ci in
+      let* names := match cp_get (cf_cp cf) ni with
+                    | Some (CPString u) => let* raw := cp_utf8 (cf_cp cf) u in utf8_units raw
+                    | _ => None
+                    end in
+      let* getters := map_opt (fun g => match cp_get (cf_cp cf) g with
+                                       | Some (CPMethodHandle k r) => if k =? 1 then cp_fieldref (cf_cp cf) r else None
+                                       | _ => None
+                                       end) gs in
+      Some (rc, (match getters with nil => nil | _ => split_units names nil end), getters)
+  | _ => None
+  end.
+
+(** Class.getSimpleName: the inner name of the class's own InnerClasses entry,
+    else (a top-level class) the name after the last '/'. *)
+Fixpoint ic_scan (c : cp) (this : string) (n : nat) (l : bytes) : option (option Z) :=
+  match n with
+  | O => Some None
+  | S k =>
+    let* (inner, l) := u2 l in let* (_, l) := u2 l in let* (nm, l) := u2 l in let* (_, l) := u2 l in
+    if match cp_class c inner with Some x => String.eqb x this | None => false end then Some (Some nm)
+    else ic_scan c this k l
+  end.
+
+Definition simple_name (cf : classfile) : option (list Z) :=
+  let top := let* raw := Some (match last_slash (cf_this cf) 0 None with
+                                | Some i => substring (S i) (String.length (cf_this cf)) (cf_this cf)
+                                | None => cf_this cf
+                                end) in utf8_units raw in
+  match find_attr "InnerClasses" (cf_attrs cf) with
+  | None => top
+  | Some bs =>
+      let* (n, l) := u2 bs in
+      let* e := ic_scan (cf_cp cf) (cf_this cf) (Z.to_nat n) l in
+      match e with
+      | None => top
+      | Some nm => if nm =? 0 then Some nil else let* raw := cp_utf8 (cf_cp cf) nm in utf8_units raw
+      end
+  end.
+
+Definition true_units : list Z := [116; 114; 117; 101].
+Definition false_units : list Z := [102; 97; 108; 115; 101].
+
+(** String.valueOf of a component (Objects.toString for references): primitives,
+    null, Strings and the modelled boxes; float/double and other objects (a
+    toString() call back into bytecode) are not modelled. *)
+Definition component_units (h : heap) (t : jtype) (v : value) : string + list Z :=
+  match t, v with
+  | (TInt | TShort | TByte), VInt z => inr (z_units z)
+  | TLong, VLong z => inr (z_units z)
+  | TChar, VInt z => inr [z]
+  | TBool, VInt z => inr (if z =? 0 then false_units else true_units)
+  | (TRef _ | TArr _), VNull => inr [110; 117; 108; 108]
+  | (TRef _ | TArr _), VRef l =>
+      match h l with
+      | Some (OStr u) => inr u
+      | Some (OObj c [("value", w)]) =>
+          match w with
+          | VInt z => if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Short" || String.eqb c "java/lang/Byte"
+                      then inr (z_units z)
+                      else if String.eqb c "java/lang/Character" then inr [z]
+                      else if String.eqb c "java/lang/Boolean" then inr (if z =? 0 then false_units else true_units)
+                      else inl "record toString: component needs toString() (callback not modelled)"
+          | VLong z => if String.eqb c "java/lang/Long" then inr (z_units z)
+                       else inl "record toString: component needs toString() (callback not modelled)"
+          | _ => inl "record toString: component needs toString() (callback not modelled)"
+          end
+      | _ => inl "record toString: component needs toString() (callback not modelled)"
+      end
+  | (TFloat | TDouble), _ => inl "record toString: float/double component (Float/Double.toString not modelled)"
+  | _, _ => inl "record toString: component type"
+  end.
+
+Fixpoint units_eqb (a b : list Z) : bool :=
+  match a, b with
+  | nil, nil => true
+  | x :: a', y :: b' => (x =? y) && units_eqb a' b'
+  | _, _ => false
+  end.
+
+Definition string_hash (u : list Z) : Z := fold_left (fun h c => wrap32 (h * 31 + c)) u 0.
+Definition long_hash (z : Z) : Z := let u := z mod 2 ^ 64 in wrap32 (Z.lxor u (Z.shiftr u 32)).
+
+(** Integer/Long/.../Float/Double/Boolean.hashCode of a primitive, Objects.hashCode of a reference. *)
+Definition component_hash (h : heap) (t : jtype) (v : value) : option Z :=
+  match t, v with
+  | (TInt | TShort | TByte | TChar), VInt z => Some z
+  | TBool, VInt z => Some (if z =? 0 then 1237 else 1231)
+  | TLong, VLong z => Some (long_hash z)
+  | TFloat, VFloat b => Some (wrap32 (Float.canon32 b))
+  | TDouble, VDouble b => Some (long_hash (Float.canon64 b))
+  | (TRef _ | TArr _), VNull => Some 0
+  | (TRef _ | TArr _), VRef l =>
+      match h l with
+      | Some (OStr u) => Some (string_hash u)
+      | Some (OObj c [("value", w)]) =>
+          match w with
+          | VInt z => if String.eqb c "java/lang/Boolean" then Some (if z =? 0 then 1237 else 1231)
+                      else if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Short"
+                              || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character" then Some z
+                      else None
+          | VLong z => if String.eqb c "java/lang/Long" then Some (long_hash z) else None
+          | _ => None
+          end
+      | _ => None
+      end
+  | _, _ => None
+  end.
+
+(** ObjectMethods' equalator: == for int-like/long/boolean, Float/Double.compare == 0,
+    Objects.equals for references (Strings and the modelled boxes; another
+    object's equals() would be a call back into bytecode). *)
+Definition component_eq (h : heap) (t : jtype) (a b : value) : option bool :=
+  match t, a, b with
+  | (TInt | TShort | TByte | TChar | TBool), VInt x, VInt y => Some (x =? y)
+  | TLong, VLong x, VLong y => Some (x =? y)
+  | TFloat, VFloat x, VFloat y => Some (Float.canon32 x =? Float.canon32 y)
+  | TDouble, VDouble x, VDouble y => Some (Float.canon64 x =? Float.canon64 y)
+  | (TRef _ | TArr _), VNull, VNull => Some true
+  | (TRef _ | TArr _), VNull, VRef _ => Some false
+  | (TRef _ | TArr _), VRef x, _ =>
+      if match b with VRef y => x =? y | _ => false end then Some true else
+      match h x with
+      | Some (OStr u) => match b with
+                         | VRef y => match h y with Some (OStr u') => Some (units_eqb u u') | _ => Some false end
+                         | _ => Some false
+                         end
+      | Some (OObj c [("value", w)]) =>
+          if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Short"
+             || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character" || String.eqb c "java/lang/Boolean" then
+            match b with
+            | VRef y => match h y with
+                        | Some (OObj c' [("value", w')]) =>
+                            Some (String.eqb c c' && match w, w' with
+                                                     | VInt i, VInt j | VLong i, VLong j => i =? j
+                                                     | _, _ => false
+                                                     end)
+                        | _ => Some false
+                        end
+            | _ => Some false
+            end
+          else None
+      | _ => None
+      end
+  | _, _, _ => None
+  end.
+
+Definition record_component (p : program) (h : heap) (o : Z) (g : fieldref) : option (jtype * value) :=
+  match h o, field_type (fr_desc g) with
+  | Some (OObj _ fs), Some t => option_map (fun v => (t, v)) (obj_get p g fs)
+  | _, _ => None
+  end.
+
+Definition record_to_string (p : program) (h : heap) (rcf : classfile) (names : list (list Z))
+           (gs : list fieldref) (o : Z) : string + list Z :=
+  match simple_name rcf with
+  | None => inl "record toString: class name"
+  | Some sn =>
+    let fix go (ns : list (list Z)) (gs : list fieldref) (first : bool) : string + list Z :=
+      match ns, gs with
+      | nil, nil => inr [93]
+      | n :: ns', g :: gs' =>
+          match record_component p h o g with
+          | None => inl "record toString: component field"
+          | Some (t, v) =>
+              match component_units h t v, go ns' gs' false with
+              | inr a, inr b => inr (app (if first then nil else [44; 32]) (app n (61 :: app a b)))
+              | inl e, _ | _, inl e => inl e
+              end
+          end
+      | _, _ => inl "record toString: names and getters differ"
+      end in
+    match go names gs true with
+    | inr b => inr (app sn (91 :: b))
+    | inl e => inl e
+    end
+  end.
+
+Definition record_hash (p : program) (h : heap) (gs : list fieldref) (o : Z) : option Z :=
+  fold_left (fun acc g => let* a := acc in let* (t, v) := record_component p h o g in
+                          let* x := component_hash h t v in Some (wrap32 (a * 31 + x))) gs (Some 0).
+
+(** equals: the same object; else not an instance of the record class: false;
+    else the components, compared from the last to the first (the nesting of
+    ObjectMethods.makeEquals' guardWithTest), stopping at the first difference. *)
+Definition record_equals (p : program) (h : heap) (rc : string) (gs : list fieldref) (o : Z) (other : value)
+  : option bool :=
+  match other with
+  | VNull => Some false
+  | VRef x =>
+    if x =? o then Some true else
+    match h x with
+    | None => None
+    | Some ox =>
+      match obj_assignable p ox rc with
+      | Some false => Some false
+      | None => None
+      | Some true =>
+          fold_left (fun acc g => match acc with
+                                  | Some true =>
+                                      match record_component p h o g, record_component p h x g with
+                                      | Some (t, a), Some (_, b) => component_eq h t a b
+                                      | _, _ => None
+                                      end
+                                  | r => r
+                                  end) (rev gs) (Some true)
+      end
+    end
+  | _ => None
+  end.
+
+(** ** java.lang.runtime.SwitchBootstraps.typeSwitch / enumSwitch (JDK 21). *)
+Inductive slabel : Type := SLClass (c : string) | SLStr (u : list Z) | SLInt (z : Z) | SLEnum (e : string) (n : string).
+
+Definition switch_labels (cf : classfile) (enum_cls : option string) (args : list Z) : option (list slabel) :=
+  map_opt (fun i =>
+    match cp_get (cf_cp cf) i, enum_cls with
+    | Some (CPClass _), _ => option_map SLClass (cp_class (cf_cp cf) i)
+    | Some (CPString u), None => let* raw := cp_utf8 (cf_cp cf) u in let* us := utf8_units raw in Some (SLStr us)
+    | Some (CPString u), Some e => let* raw := cp_utf8 (cf_cp cf) u in Some (SLEnum e raw)
+    | Some (CPInt z), None => Some (SLInt z)
+    | _, _ => None          (* EnumDesc / other dynamic constants: not modelled *)
+    end) args.
+
+(** The class whose superclass is java.lang.Enum (Enum.getDeclaringClass). *)
+Fixpoint enum_decl (p : program) (fuel : nat) (c : string) : option string :=
+  match fuel with
+  | O => None
+  | S k => match find_class p c with
+           | Some cf => match cf_super cf with
+                        | Some s => if String.eqb s "java/lang/Enum" then Some c else enum_decl p k s
+                        | None => None
+                        end
+           | None => None
+           end
+  end.
+
+Definition label_matches (p : program) (s : mstate) (o : Z) (lb : slabel) : option bool :=
+  match ms_heap s o with
+  | None => None
+  | Some ob =>
+    match lb with
+    | SLClass c => obj_assignable p ob c
+    | SLStr u => match ob with
+                 | OStr u' => Some (units_eqb u u')
+                 | OObj c _ => if is_box_name c then Some false else None   (* target.equals(label) *)
+                 | OArr _ _ | OLam _ _ _ _ _ | OCls _ => Some false      (* Object.equals: identity *)
+                 | OSb _ => Some false
+                 end
+    | SLInt k => match ob with
+                 | OObj c [("value", w)] =>
+                     match w with
+                     | VInt z => if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Short"
+                                    || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character"
+                                 then Some (k =? z) else if String.eqb c "java/lang/Boolean" then Some false else None
+                     | VLong z => if String.eqb c "java/lang/Long" then Some (k =? wrap32 z) else None
+                     | _ => None
+                     end
+                 | OStr _ | OArr _ _ | OLam _ _ _ _ _ | OCls _ | OSb _ => Some false
+                 | OObj c _ => match subclass p 64 c "java/lang/Number" with Some false => Some false | _ => None end
+                 end
+    | SLEnum e n =>
+        match ob with
+        | OObj c _ =>
+            match enum_decl p 64 c with
+            | Some d => if negb (String.eqb d e) then Some false else
+                        match find_class p e with
+                        | Some ecf => match mb_find n ("L" ++ e ++ ";") (cf_fields ecf) with
+                                      | Some a => if Z.testbit a 14 && acc_static a then
+                                                    match assoc (static_key e n) (ms_statics s) with
+                                                    | Some (VRef x) => Some (x =? o)
+                                                    | Some _ => Some false
+                                                    | None => None
+                                                    end
+                                                  else Some false
+                                      | None => Some false
+                                      end
+                        | None => None
+                        end
+            | None => match subclass p 64 c "java/lang/Enum" with Some false => Some false | _ => None end
+            end
+        | _ => Some false
+        end
+    end
+  end.
+
+Fixpoint switch_index (p : program) (s : mstate) (o : Z) (lbs : list slabel) (i : Z) : option Z :=
+  match lbs with
+  | nil => Some i
+  | lb :: r => match label_matches p s o lb with
+               | Some true => Some i
+               | Some false => switch_index p s o r (i + 1)
+               | None => None
+               end
   end.
 
 (** multianewarray: nested arrays for the given counts (outermost first). *)
@@ -1575,6 +2035,83 @@ Fixpoint multi_alloc (fuel : nat) (s : mstate) (t : jtype) (counts : list Z) : o
         end
     | _, _ => None
     end
+  end.
+
+(** invokedynamic call sites other than string concatenation and lambdas. *)
+Definition indy_other (p : program) (s : mstate) (top : cframe) (rest : list cframe) (cf : classfile)
+           (bi : Z) (name desc : string) (st : list value) (nx : pc) : mstep :=
+  let go (st' : list value) (s' : mstate) : mstep :=
+    if stack_slots st' <=? c_max_stack (cf_code top)
+    then MNext (with_frames s' (set_frame top (mkframe nx st' (f_locals (cf_frame top))) :: rest))
+    else MStuck "operand stack overflow (max_stack)" in
+  match bsm_site cf bi, parse_mdesc desc with
+  | Some (m, args), Some (ps, _) =>
+    if is_bsm m "java/lang/runtime/ObjectMethods" "bootstrap" then
+      match record_site cf args with
+      | None => MStuck "ObjectMethods.bootstrap: static arguments"
+      | Some (rc, names, gs) =>
+        match find_class p rc with
+        | None => MStuck "ObjectMethods.bootstrap: record class not loaded"
+        | Some rcf =>
+          if String.eqb name "toString" then
+            match st with
+            | VRef o :: r => match record_to_string p (ms_heap s) rcf names gs o with
+                             | inr u => let (l, s') := alloc s (OStr u) in go (VRef l :: r) s'
+                             | inl why => MStuck why
+                             end
+            | VNull :: _ => throw_new p s NPE
+            | _ => MStuck "ObjectMethods: operand"
+            end
+          else if String.eqb name "hashCode" then
+            match st with
+            | VRef o :: r => match record_hash p (ms_heap s) gs o with
+                             | Some z => go (VInt z :: r) s
+                             | None => MStuck "record hashCode: component needs hashCode() (identity hash or callback not modelled)"
+                             end
+            | VNull :: _ => throw_new p s NPE
+            | _ => MStuck "ObjectMethods: operand"
+            end
+          else if String.eqb name "equals" then
+            match st with
+            | other :: VRef o :: r => match record_equals p (ms_heap s) rc gs o other with
+                                      | Some b => go (VInt (if b then 1 else 0) :: r) s
+                                      | None => MStuck "record equals: component needs equals() (callback not modelled)"
+                                      end
+            | _ :: VNull :: _ => throw_new p s NPE
+            | _ => MStuck "ObjectMethods: operand"
+            end
+          else MStuck "ObjectMethods.bootstrap: method name"
+        end
+      end
+    else if is_bsm m "java/lang/runtime/SwitchBootstraps" "typeSwitch"
+            || is_bsm m "java/lang/runtime/SwitchBootstraps" "enumSwitch" then
+      let enum_cls := if String.eqb (mr_name m) "enumSwitch"
+                      then match ps with TRef e :: _ => Some e | _ => None end else None in
+      if String.eqb (mr_name m) "enumSwitch" && match enum_cls with None => true | _ => false end
+      then MStuck "enumSwitch: invocation type" else
+      match switch_labels cf enum_cls args with
+      | None => MStuck "SwitchBootstraps: label kind not modelled (EnumDesc / dynamic constant)"
+      | Some lbs =>
+        if negb (forallb (fun lb => match lb, enum_cls with SLClass c, Some e => String.eqb c e | _, _ => true end) lbs)
+        then MStuck "enumSwitch: a Class label that is not the enum class (BootstrapMethodError)" else
+        match st with
+        | VInt restart :: target :: r =>
+            (* Objects.checkIndex(restart, labels.length + 1) comes first *)
+            if (restart <? 0) || (Z.of_nat (length lbs) <? restart)
+            then throw_new p s "java/lang/IndexOutOfBoundsException" else
+            match target with
+            | VNull => go (VInt (-1) :: r) s
+            | VRef o => match switch_index p s o (skipn (Z.to_nat restart) lbs) restart with
+                        | Some i => go (VInt i :: r) s
+                        | None => MStuck "SwitchBootstraps: a label test needs a call back into bytecode"
+                        end
+            | _ => MStuck "SwitchBootstraps: operand"
+            end
+        | _ => MStuck "SwitchBootstraps: operand"
+        end
+      end
+    else MStuck "invokedynamic: bootstrap method not modelled"
+  | _, _ => MStuck "invokedynamic: bootstrap method not modelled"
   end.
 
 (** getfield/putfield when the receiver is null or the object has no field of
@@ -1767,8 +2304,8 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                   | VRef vl =>
                       match h vl with
                       | Some o =>
-                          match assignable p 64 (runtime_type o) (match e with TArr _ => type_desc e
-                                                                         | TRef c => c | _ => "" end) with
+                          match obj_assignable p o (match e with TArr _ => type_desc e
+                                                                     | TRef c => c | _ => "" end) with
                           | Some true => store s
                           | Some false => throw_new p s "java/lang/ArrayStoreException"
                           | None => MStuck "aastore: cannot decide the element type"
@@ -1794,7 +2331,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         | VNull :: _ => go st s
         | VRef l :: _ =>
             match h l with
-            | Some o => match assignable p 64 (runtime_type o) cn with
+            | Some o => match obj_assignable p o cn with
                         | Some true => go st s
                         | Some false => throw_new p s "java/lang/ClassCastException"
                         | None => MStuck "checkcast: cannot decide"
@@ -1808,7 +2345,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         | VNull :: r => go (VInt 0 :: r) s
         | VRef l :: r =>
             match h l with
-            | Some o => match assignable p 64 (runtime_type o) cn with
+            | Some o => match obj_assignable p o cn with
                         | Some b => go (VInt (if b then 1 else 0) :: r) s
                         | None => MStuck "instanceof: cannot decide"
                         end
@@ -1870,11 +2407,12 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                   end
               | None => MStuck "invokedynamic: operand stack"
               end
-          | _, Some (ps, Some (TRef iface)) =>
+          | _, Some (ps, Some (TRef iface0)) =>
               match lambda_site cf bi with
-              | Some (kind, impl) =>
+              | Some (kind, impl, markers) =>
                   match pop_n (length ps) st with
                   | Some (cap, r) =>
+                      let iface := fold_left (fun acc m => acc ++ ";" ++ m) markers iface0 in
                       let o := OLam iface name kind impl cap in
                       (* non-capturing lambdas are one object per call site *)
                       let (l, s') := match cap with
@@ -1892,9 +2430,9 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                       go (VRef l :: r) s'
                   | None => MStuck "invokedynamic: operand stack"
                   end
-              | None => MStuck "invokedynamic: bootstrap method not modelled (only string concatenation and LambdaMetafactory.metafactory)"
+              | None => indy_other p s top rest cf bi name desc st nx
               end
-          | _, _ => MStuck "invokedynamic: bootstrap method not modelled"
+          | _, _ => indy_other p s top rest cf bi name desc st nx
           end
         end
     | Multianewarray cn dims =>

@@ -1,0 +1,4 @@
+classes/corpus10 org.rocqjvm.corpus10.Boxes instances (I)I
+classes/corpus10 org.rocqjvm.corpus10.Boxes stores (I)I
+classes/corpus10 org.rocqjvm.corpus10.Boxes casts (I)I
+classes/corpus10 org.rocqjvm.corpus10.Boxes mixedVarargs (I)I

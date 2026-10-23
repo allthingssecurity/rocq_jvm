@@ -1,0 +1,14 @@
+classes/corpus8 org.rocqjvm.corpus8.Indy ctorRefs (I)I fresh
+classes/corpus8 org.rocqjvm.corpus8.Indy ctorRefInit (I)I fresh
+classes/corpus8 org.rocqjvm.corpus8.Indy ctorRefFail (I)I fresh
+classes/corpus8 org.rocqjvm.corpus8.Indy arrayCtorRef (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy altMeta (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy recToString (I)Ljava/lang/String;
+classes/corpus8 org.rocqjvm.corpus8.Indy recEquals (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy recHash (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy recHolder (I)Ljava/lang/String;
+classes/corpus8 org.rocqjvm.corpus8.Indy typeSwitch (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy sealedSwitch (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy stringSwitch (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy boxSwitch (I)I
+classes/corpus8 org.rocqjvm.corpus8.Indy enumSwitch (I)I
