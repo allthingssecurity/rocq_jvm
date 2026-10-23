@@ -1,0 +1,14 @@
+-Q theories JVM
+-arg -w -arg -notation-overridden
+theories/Core/Int.v
+theories/Core/Instr.v
+theories/Core/Desc.v
+theories/Core/Semantics.v
+theories/Core/Tactics.v
+theories/Loader/Hex.v
+theories/Loader/ClassFile.v
+theories/Classes/WalMain_TransactionLog.v
+theories/Classes/WalFix_TransactionLog.v
+theories/Camel/WalSpec.v
+theories/Camel/WalCanUpdate.v
+theories/Extract.v

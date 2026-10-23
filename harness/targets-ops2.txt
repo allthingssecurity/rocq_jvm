@@ -1,0 +1,4 @@
+classes/corpus org.rocqjvm.corpus.Ops2 ldcs (I)I
+classes/corpus org.rocqjvm.corpus.Ops2 refs (I)I
+classes/corpus org.rocqjvm.corpus.Ops2 big (I)I
+classes/corpus org.rocqjvm.corpus.Ops2 refs2 (III)I
