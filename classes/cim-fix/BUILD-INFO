@@ -1,0 +1,14 @@
+label: cim-fix
+remote branches containing it:  fork/camel-util-case-insensitive-map-removed-slots 
+commit: 27aeb4f860d9268fec79981dca26549a5d25de99
+module: core/camel-util/src/main/java
+sources: org/apache/camel/util/CaseInsensitiveMap.java
+javac: javac 21.0.12.1 --release 17 -g
+built: 2026-10-23T17:07:55Z
+sha256:
+  e30e31a8190c1ff5db4ecd7f1001ac1e8188df9de0e3a483cbc9aed57d5d495a  ./org/apache/camel/util/CaseInsensitiveMap$EntryIterator.class
+  08711816cd6b64012c9e2908b5b6a365d1128553f5103c1fe8478383c5d1ccca  ./org/apache/camel/util/CaseInsensitiveMap$EntrySet.class
+  4811b7d79259769269acd3db4dc9575d6bdbd60d31073b43182380d4077d94cf  ./org/apache/camel/util/CaseInsensitiveMap$KeyIterator.class
+  f22f92597494d21e5de384e0e415c7f0862a5ec2521188ba05be75e1758fb64d  ./org/apache/camel/util/CaseInsensitiveMap$KeySet.class
+  75e466c00a624a4abf3e51a7bb5fc555b73e786186a459e8811151df39aab9a5  ./org/apache/camel/util/CaseInsensitiveMap$MapEntry.class
+  94455d34cd6840cc03e3b7a5571ae62942a60a6b5552166439957d49c6b24b1e  ./org/apache/camel/util/CaseInsensitiveMap.class

@@ -16,7 +16,24 @@ def pool(bits):
             if lo <= -v <= hi: p.add(-v)
     return sorted(p), lo, hi
 P = {'I': pool(32), 'J': pool(64), 'S': pool(16), 'B': pool(8)}
+ALPH = list("abcABCxyzXYZ019 .,:;/?&=()[]{}'\"-_+*#%@!~\t\n") + [
+    0xe9, 0xc9, 0xdf, 0x130, 0x131, 0x3a3, 0x3c3, 0x3c2, 0xb5, 0xff, 0x178, 0x212a, 0x1e9e,
+    0xd801, 0xdc00, 0xdc28, 0x0, 0x660, 0xff11, 0xa0, 0x2000, 0x3000, 0xfeff]
+def rstring():
+    if rng.random() < 0.05: return "null"
+    n = rng.choice([0, 0, 1, 2, 3, 4, 5, 6, 8, 12])
+    cs = []
+    while len(cs) < n:
+        r = rng.random()
+        if r < 0.08:  # surrogate pair: Deseret / math letters / emoji
+            cp = rng.choice([0x10400, 0x10428, 0x1d400, 0x1f600, 0x10427, 0x1044f])
+            cs += [0xd800 + ((cp - 0x10000) >> 10), 0xdc00 + ((cp - 0x10000) & 0x3ff)]
+        else:
+            c = rng.choice(ALPH)
+            cs.append(ord(c) if isinstance(c, str) else c)
+    return "s:" + "".join("%04x" % c for c in cs)
 def val(t):
+    if t == 'Ljava/lang/String;': return rstring()
     if t in P and rng.random() < 0.05: return 0          # divisors / shift distances / zero tests
     if t == 'Z': return rng.randint(0, 1)
     if t == 'C': return rng.choice([0, 1, 65535, rng.randint(0, 65535)])

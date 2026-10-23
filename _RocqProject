@@ -5,6 +5,9 @@ theories/Core/Instr.v
 theories/Core/Desc.v
 theories/Core/Semantics.v
 theories/Core/Tactics.v
+theories/Core/Machine.v
+theories/Jdk/Strings.v
+theories/Jdk/Jdk.v
 theories/Loader/Hex.v
 theories/Loader/ClassFile.v
 theories/Classes/WalMain_TransactionLog.v

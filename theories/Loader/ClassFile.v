@@ -400,6 +400,7 @@ Record classfile := {
   cf_interfaces : list string;
   cf_fields : list member;
   cf_methods : list method;
+  cf_attrs : list attribute;      (** class attributes (BootstrapMethods, ...) *)
 }.
 
 Fixpoint u2s (n : nat) (l : bytes) : option (list Z * bytes) :=
@@ -423,8 +424,10 @@ Definition parse_class (l : bytes) : option classfile :=
   let* (nf, l) := u2 l in let* (fs, l) := members (Z.to_nat nf) c l in
   let* (nm, l) := u2 l in let* (ms, l) := members (Z.to_nat nm) c l in
   let* meths := map_opt (to_method c) ms in
+  let* (na, l) := u2 l in let* (ats, _) := attributes (Z.to_nat na) c l in
   Some {| cf_major := major; cf_cp := c; cf_access := acc; cf_this := this; cf_super := super;
-          cf_interfaces := ifnames; cf_fields := fs; cf_methods := meths |}.
+          cf_interfaces := ifnames; cf_fields := fs; cf_methods := meths;
+          cf_attrs := ats |}.
 
 Fixpoint find_method_in (name desc : string) (ms : list method) : option method :=
   match ms with
@@ -438,3 +441,59 @@ Definition find_method (cf : classfile) (name desc : string) : option method :=
 
 Definition load_method (bs : bytes) (name desc : string) : option method :=
   let* cf := parse_class bs in find_method cf name desc.
+
+(** ** Modified UTF-8 (JVMS 4.4.7) to UTF-16 code units, for String constants. *)
+Fixpoint mutf8_units (fuel : nat) (bs : list Z) : option (list Z) :=
+  match fuel with
+  | O => None
+  | S k =>
+    match bs with
+    | nil => Some nil
+    | b :: r =>
+      if b <? 128 then
+        (if b =? 0 then None else option_map (cons b) (mutf8_units k r))
+      else if (Z.land b 224 =? 192) then
+        match r with
+        | b2 :: r2 => if Z.land b2 192 =? 128
+                      then option_map (cons (Z.land b 31 * 64 + Z.land b2 63)) (mutf8_units k r2)
+                      else None
+        | _ => None
+        end
+      else if (Z.land b 240 =? 224) then
+        match r with
+        | b2 :: b3 :: r3 =>
+            if (Z.land b2 192 =? 128) && (Z.land b3 192 =? 128)
+            then option_map (cons (Z.land b 15 * 4096 + Z.land b2 63 * 64 + Z.land b3 63)) (mutf8_units k r3)
+            else None
+        | _ => None
+        end
+      else None
+    end
+  end.
+
+Definition string_bytes (s : string) : list Z :=
+  map (fun c => Z.of_N (Ascii.N_of_ascii c)) (list_ascii_of_string s).
+
+(** UTF-16 units of a constant-pool Utf8 entry as stored by the decoder. *)
+Definition utf8_units (s : string) : option (list Z) :=
+  let bs := string_bytes s in mutf8_units (S (length bs)) bs.
+
+Example mutf8_nul : mutf8_units 10 [97; 192; 128; 98] = Some [97; 0; 98].
+Proof. reflexivity. Qed.
+Example mutf8_3 : mutf8_units 10 [226; 130; 172] = Some [8364].   (* U+20AC EURO SIGN *)
+Proof. reflexivity. Qed.
+
+(** A BootstrapMethods entry: the method handle cp index and the argument cp indices. *)
+Fixpoint bootstrap_entries (n : nat) (l : bytes) : option (list (Z * list Z) * bytes) :=
+  match n with
+  | O => Some (nil, l)
+  | S k =>
+      let* (mh, l) := u2 l in let* (na, l) := u2 l in let* (args, l) := u2s (Z.to_nat na) l in
+      let* (rest, l) := bootstrap_entries k l in Some ((mh, args) :: rest, l)
+  end.
+
+Definition bootstrap_methods (cf : classfile) : option (list (Z * list Z)) :=
+  match find_attr "BootstrapMethods" (cf_attrs cf) with
+  | None => Some nil
+  | Some bs => let* (n, l) := u2 bs in let* (es, _) := bootstrap_entries (Z.to_nat n) l in Some es
+  end.

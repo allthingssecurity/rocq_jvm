@@ -1,0 +1,62 @@
+fadd                                     inputs=  250000 mismatches=       0
+fsub                                     inputs=  250000 mismatches=       0
+fmul                                     inputs=  250000 mismatches=       0
+fdiv                                     inputs=  250000 mismatches=       0
+frem                                     inputs=  250000 mismatches=       0
+fneg                                     inputs=  250000 mismatches=       0
+fneg_raw                                 inputs=  250000 mismatches=       0
+dadd                                     inputs=  250000 mismatches=       0
+dsub                                     inputs=  250000 mismatches=       0
+dmul                                     inputs=  250000 mismatches=       0
+ddiv                                     inputs=  250000 mismatches=       0
+drem                                     inputs=  250000 mismatches=       0
+dneg                                     inputs=  250000 mismatches=       0
+dneg_raw                                 inputs=  250000 mismatches=       0
+i2f                                      inputs=  250000 mismatches=       0
+i2d                                      inputs=  250000 mismatches=       0
+l2f                                      inputs=  250000 mismatches=       0
+l2d                                      inputs=  250000 mismatches=       0
+f2d                                      inputs=  250000 mismatches=       0
+d2f                                      inputs=  250000 mismatches=       0
+f2i                                      inputs=  250000 mismatches=       0
+f2l                                      inputs=  250000 mismatches=       0
+d2i                                      inputs=  250000 mismatches=       0
+d2l                                      inputs=  250000 mismatches=       0
+fcmpl                                    inputs=  250000 mismatches=       0
+fcmpg                                    inputs=  250000 mismatches=       0
+dcmpl                                    inputs=  250000 mismatches=       0
+dcmpg                                    inputs=  250000 mismatches=       0
+TOTAL mismatches: 0
+model fadd vs JVM fsub                   inputs=  250000 mismatches=  244993
+    in: c184fa01 c184fa01                   model: c204fa01           jvm: fc50cdbc
+    in: a9552a64 361041a8                   model: 361041a8           jvm: 34f19818
+model dadd vs JVM dsub                   inputs=  250000 mismatches=  245866
+    in: 30b26d0c329ab851 33ee017f514a3f5e   model: 33ee017f514a3f60   jvm: 8000000000000009
+    in: c21137aaeb671b8b 3fe0000000000000   model: c21137aaeb651b8b   jvm: cf563f998ce95f3
+model fcmpl vs JVM fcmpg                 inputs=  250000 mismatches=  138929
+    in: c10b5d45 34000000                   model: -1                 jvm: 1
+    in: 9030a0f8 102c0000                   model: -1                 jvm: 1
+mutant ties-away fadd vs JVM fadd        inputs=  250000 mismatches=    6183
+    in: b4f98032 b4f9802f                   model: b5798031           jvm: b5798030
+    in: 17a94bd2 17896aeb                   model: 18195b5f           jvm: 18195b5e
+mutant ties-away dadd vs JVM dadd        inputs=  250000 mismatches=    5916
+    in: b4d670cbcd943db0 b4d1deec358ad045   model: b4e427dc018f86fb   jvm: b4e427dc018f86fa
+    in: bf4b2e3f18d46828 bf4b2e3f18d46825   model: bf5b2e3f18d46827   jvm: bf5b2e3f18d46826
+mutant ties-away fmul vs JVM fmul        inputs=  250000 mismatches=    2114
+    in: f1400000 95e85e5e                   model: 47ae46c7           jvm: 47ae46c6
+    in: bf400000 1d567a96                   model: 9d20dbf1           jvm: 9d20dbf0
+mutant ties-away dmul vs JVM dmul        inputs=  250000 mismatches=    1882
+    in: bff8000000000000 000000000000000b   model: 8000000000000011   jvm: 8000000000000010
+    in: 943270ece8439483 bff8000000000000   model: 143ba9635c655ec5   jvm: 143ba9635c655ec4
+mutant flush-to-zero fadd vs JVM fadd    inputs=  250000 mismatches=    6172
+    in: 007fffff 807ffffe                   model: 0                  jvm: 1
+    in: 00800001 80ba3f84                   model: 80000000           jvm: 803a3f83
+mutant flush-to-zero dadd vs JVM dadd    inputs=  250000 mismatches=    4888
+    in: 800707c930a291a3 80020a8181a2d43d   model: 8000000000000000   jvm: 8009124ab24565e0
+    in: 0010000000000004 8010000000000000   model: 0                  jvm: 4
+mutant flush-to-zero fmul vs JVM fmul    inputs=  250000 mismatches=    8026
+    in: b2c90eaa 09b91d31                   model: 80000000           jvm: 800122c5
+    in: 85492fba b477f758                   model: 0                  jvm: 617
+mutant flush-to-zero dmul vs JVM dmul    inputs=  250000 mismatches=    3400
+    in: 1d76c3f53cfd6dc0 a0a0000000000000   model: 8000000000000000   jvm: 80000000002d87ea
+    in: bff8000000000000 000000000000000b   model: 8000000000000000   jvm: 8000000000000010

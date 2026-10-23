@@ -1,0 +1,14 @@
+label: cim-main
+remote branches containing it:  origin/fix/CAMEL-25968-core-languages-bugs origin/fix/CAMEL-26013-messaging-bugs origin/fix/CAMEL-26019-redis-couchbase-bugs 
+commit: 36bebb520a632d0d02a90680bba60e2a1e3941f9
+module: core/camel-util/src/main/java
+sources: org/apache/camel/util/CaseInsensitiveMap.java
+javac: javac 21.0.12.1 --release 17 -g
+built: 2026-10-23T17:07:46Z
+sha256:
+  8fb3991024ae544596846abd0ebad32c732dcb5cb43f4484ffede6f9ce1bd22e  ./org/apache/camel/util/CaseInsensitiveMap$EntryIterator.class
+  18ac9417b622251513cc3e367acd6b6a16a3086fb7d6780f131f951e41d401e7  ./org/apache/camel/util/CaseInsensitiveMap$EntrySet.class
+  bf708b7ffe41e353b5c73c1b83ef38c16fa6a2c19e7377ddaa752929063f1289  ./org/apache/camel/util/CaseInsensitiveMap$KeyIterator.class
+  709b617f9aa606c177a7af5ba10b5dbcb667f74dd6f44c54d81d91c6a08053c8  ./org/apache/camel/util/CaseInsensitiveMap$KeySet.class
+  b32f7d0b92064956993af013826e7f23532714081c8366a2383b78c9174b88b3  ./org/apache/camel/util/CaseInsensitiveMap$MapEntry.class
+  347ef3c60c61feb440cc9add04b8c05140c78710cb9bcfbeafb73d15e94188ad  ./org/apache/camel/util/CaseInsensitiveMap.class
