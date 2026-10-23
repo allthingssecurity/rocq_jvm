@@ -467,4 +467,74 @@ Proof.
   unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, H1, H2. cbn [alloc fst snd].
   cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
+Lemma mstep_xaload : forall s top rest nx k i l r e es v,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (ALoadArr k, nx) ->
+  f_stack (cf_frame top) = VInt i :: VRef l :: r ->
+  ms_heap s l = Some (OArr e es) ->
+  akind_load_ok k e = true ->
+  ((i <? 0) || (Z.of_nat (length es) <=? i))%Z = false ->
+  nth_z es i = Some v ->
+  (stack_slots (v :: r) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (v :: r) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest nx k i l r e es v Hfr Hf Hst Hh Hk Hr Hn Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk. cbn [negb]. rewrite Hr, Hn.
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+
+(** Stores of a non-reference value (iastore, ...). *)
+Lemma mstep_xastore_prim : forall s top rest nx k v i l r e es,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (AStoreArr k, nx) ->
+  f_stack (cf_frame top) = v :: VInt i :: VRef l :: r ->
+  (match v with VRef _ => false | _ => true end) = true ->
+  ms_heap s l = Some (OArr e es) ->
+  akind_ok k e v = true ->
+  ((i <? 0) || (Z.of_nat (length es) <=? i))%Z = false ->
+  (stack_slots r <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames {| ms_heap := upd (ms_heap s) l (OArr e (set_nth_z es i (narrow_store e v)));
+                          ms_next := ms_next s; ms_statics := ms_statics s; ms_inited := ms_inited s;
+                          ms_locks := ms_locks s; ms_frames := ms_frames s |}
+             (set_frame top (mkframe nx r (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest nx k v i l r e es Hfr Hf Hst Hv Hh Hk Hr Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst.
+  destruct v; try discriminate Hv; rewrite Hh, Hk; cbn [negb]; rewrite Hr;
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]; rewrite Hb; reflexivity.
+Qed.
+
+(** aastore of null. *)
+Lemma mstep_aastore_null : forall s top rest nx i l r e es,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (AStoreArr AA, nx) ->
+  f_stack (cf_frame top) = VNull :: VInt i :: VRef l :: r ->
+  ms_heap s l = Some (OArr e es) ->
+  akind_ok AA e VNull = true ->
+  ((i <? 0) || (Z.of_nat (length es) <=? i))%Z = false ->
+  (stack_slots r <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames {| ms_heap := upd (ms_heap s) l (OArr e (set_nth_z es i (narrow_store e VNull)));
+                          ms_next := ms_next s; ms_statics := ms_statics s; ms_inited := ms_inited s;
+                          ms_locks := ms_locks s; ms_frames := ms_frames s |}
+             (set_frame top (mkframe nx r (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest nx i l r e es Hfr Hf Hst Hh Hk Hr Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk. cbn [negb]. rewrite Hr.
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+
+Lemma mstep_arraylength : forall s top rest nx l r e es,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Arraylength, nx) ->
+  f_stack (cf_frame top) = VRef l :: r ->
+  ms_heap s l = Some (OArr e es) ->
+  (stack_slots (VInt (Z.of_nat (length es)) :: r) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (VInt (Z.of_nat (length es)) :: r) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest nx l r e es Hfr Hf Hst Hh Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh.
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
 End ArraySteps.

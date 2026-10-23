@@ -60,7 +60,10 @@ theories/Camel/WalCanUpdate.v
 theories/Camel/WalScenario.v
 theories/Camel/CimHash.v
 theories/Camel/CimSpec.v
+theories/Camel/CimProg.v
 theories/Camel/CimScenario.v
+theories/Camel/CimCalls.v
+theories/Camel/CimPut.v
 theories/Camel/WalUpdate.v
 theories/Camel/WalUpdateSpec.v
 theories/Camel/WalAdd.v
