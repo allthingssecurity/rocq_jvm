@@ -76,8 +76,8 @@ Proof.
 Qed.
 
 (** The representation. *)
-Definition cim_rep (h : heap) (m : Z) (A : list (Z * value)) (K : nat) : Prop :=
-  exists tA kA vA cA sz u thr af tbl ks vs cn pw,
+Definition cim_rep (h : heap) (m : Z) (A : list (Z * value)) (K : nat) (thr : Z) : Prop :=
+  exists tA kA vA cA sz u af tbl ks vs cn pw,
     h m = Some (OObj CIM (cim_fields tA kA vA cA sz u thr af)) /\
     h tA = Some (OArr TInt tbl) /\ h kA = Some (OArr (TRef STR) ks) /\
     h vA = Some (OArr (TRef OBJ) vs) /\ h cA = Some (OArr TInt cn) /\ tA <> cA /\
@@ -90,8 +90,8 @@ Definition cim_rep (h : heap) (m : Z) (A : list (Z * value)) (K : nat) : Prop :=
     allrefs vs /\
     A = entries ks vs (Lv ks 0 (Z.to_nat u)).
 
-Theorem get_map : forall h n sts ini lk m k ku A K,
-  cim_rep h m A K ->
+Theorem get_map : forall h n sts ini lk m k ku A K thr,
+  cim_rep h m A K thr ->
   h k = Some (OStr ku) -> slen ku <= INT_MAX -> good ku ->
   erroneous cp 64 sts CIM = false -> init_needed cp 64 ini CIM = None ->
   returns cp (mdl e) {| ms_heap := h; ms_next := n; ms_statics := sts; ms_inited := ini; ms_locks := lk;
@@ -99,8 +99,8 @@ Theorem get_map : forall h n sts ini lk m k ku A K,
     (Some (a_get h A ku))
     (fun s' => ms_heap s' = h /\ ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
-  intros h n sts ini lk m k ku A K Hrep Hk Hmax Hg He Hi.
-  destruct Hrep as (tA & kA & vA & cA & sz & u & thr & af & tbl & ks & vs & cn & pw &
+  intros h n sts ini lk m k ku A K thr Hrep Hk Hmax Hg He Hi.
+  destruct Hrep as (tA & kA & vA & cA & sz & u & af & tbl & ks & vs & cn & pw &
                     Hm & HtA & HkA & HvA & HcA & Htc & Hlen & Hpw & Hlk & Hlv & Hlc & HKmax & Hu & Hsl & Hnull & Hsz & Htbl & Hkeys & Hrefs & HA).
   set (S := Lv ks 0 (Z.to_nat u)) in *.
   destruct (find_correct e good eq_hash h ks cn tbl pw S ku Htbl Hkeys Hg ltac:(lia)) as (i & L & Hb & Hc & HlL & Hres).
@@ -307,18 +307,18 @@ Proof.
   - rewrite nth_set_other in Hi by congruence. apply (H i v Hi).
 Qed.
 
-Theorem remove_map : forall h n sts ini lk m k ku A K,
-  cim_rep h m A K ->
+Theorem remove_map : forall h n sts ini lk m k ku A K thr,
+  cim_rep h m A K thr ->
   h k = Some (OStr ku) -> slen ku <= INT_MAX -> good ku ->
   erroneous cp 64 sts CIM = false -> init_needed cp 64 ini CIM = None ->
   returns cp (mdl e) {| ms_heap := h; ms_next := n; ms_statics := sts; ms_inited := ini; ms_locks := lk;
                          ms_frames := [rm_frame m k] |}
     (Some (a_get h A ku))
-    (fun s' => cim_rep (ms_heap s') m (a_remove h A ku) K /\ same_strings h (ms_heap s') /\
+    (fun s' => cim_rep (ms_heap s') m (a_remove h A ku) K thr /\ same_strings h (ms_heap s') /\
                ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
-  intros h n sts ini lk m k ku A K Hrep Hk Hmax Hg He Hi.
-  destruct Hrep as (tA & kA & vA & cA & sz & u & thr & af & tbl & ks & vs & cn & pw &
+  intros h n sts ini lk m k ku A K thr Hrep Hk Hmax Hg He Hi.
+  destruct Hrep as (tA & kA & vA & cA & sz & u & af & tbl & ks & vs & cn & pw &
                     Hm & HtA & HkA & HvA & HcA & Htc & Hlen & Hpw & Hlk & Hlv & Hlc & HKmax & Hu & Hsl & Hnull & Hsz & Htbl & Hkeys & Hrefs & HA).
   set (S := Lv ks 0 (Z.to_nat u)) in *.
   assert (HndS : NoDup S) by apply Lv_NoDup.
@@ -356,7 +356,7 @@ Proof.
       change INT_MAX with 2147483647. clear -H Hu HKmax. lia. }
     intros s' (P1 & P2 & P3 & P4). rewrite P4.
     split; [|split; [intros y u0; reflexivity | auto]].
-    exists tA, kA, vA, cA, sz, u, thr, af, tbl, ks, vs, cn, pw. repeat (split; [assumption|]). exact HA.
+    exists tA, kA, vA, cA, sz, u, af, tbl, ks, vs, cn, pw. repeat (split; [assumption|]). exact HA.
   - (* present in slot c = first_match *)
     set (c := first_match e h ks ku L) in *.
     rewrite Hp in Hw.
@@ -402,7 +402,7 @@ Proof.
     assert (HndS' : length (remove Z.eq_dec c S) = (length S - 1)%nat) by (apply remove_length_in; assumption).
     assert (HLv : Lv (set_nth_z ks c VNull) 0 (Z.to_nat u) = remove Z.eq_dec c S) by (apply Lv_clear).
     split; [|split; [exact Hsame | auto]].
-    exists tA, kA, vA, cA, (sz - 1), u, thr, af, tbl', (set_nth_z ks c VNull), (set_nth_z vs c VNull), cn', pw.
+    exists tA, kA, vA, cA, (sz - 1), u, af, tbl', (set_nth_z ks c VNull), (set_nth_z vs c VNull), cn', pw.
     refine (conj F_m (conj F_t (conj F_k (conj F_v (conj F_c (conj Htc (conj _ (conj Hpw _)))))))).
     + unfold tbl'. destruct (p =? -1); [rewrite set_nth_len|]; exact Hlen.
     + rewrite !set_nth_len. split; [exact Hlk|]. split; [exact Hlv|]. split.
@@ -505,19 +505,19 @@ Proof.
   - rewrite nth_set_other in Hi by congruence. apply (H i w Hi).
 Qed.
 
-Theorem put_present_map : forall h n sts ini lk m k ku v A K,
-  cim_rep h m A K ->
+Theorem put_present_map : forall h n sts ini lk m k ku v A K thr,
+  cim_rep h m A K thr ->
   h k = Some (OStr ku) -> slen ku <= INT_MAX -> good ku ->
   erroneous cp 64 sts CIM = false -> init_needed cp 64 ini CIM = None -> assoc KNOWN sts = Some VNull ->
   vok h v -> a_mem h A ku = true ->
   returns cp (mdl e) {| ms_heap := h; ms_next := n; ms_statics := sts; ms_inited := ini; ms_locks := lk;
                          ms_frames := [put_frame m k v] |}
     (Some (a_get h A ku))
-    (fun s' => cim_rep (ms_heap s') m (a_set h A ku v) K /\ same_strings h (ms_heap s') /\
+    (fun s' => cim_rep (ms_heap s') m (a_set h A ku v) K thr /\ same_strings h (ms_heap s') /\
                ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
-  intros h n sts ini lk m k ku v A K Hrep Hk Hmax Hg He Hi HK Hv Hmem.
-  destruct Hrep as (tA & kA & vA & cA & sz & u & thr & af & tbl & ks & vs & cn & pw &
+  intros h n sts ini lk m k ku v A K thr Hrep Hk Hmax Hg He Hi HK Hv Hmem.
+  destruct Hrep as (tA & kA & vA & cA & sz & u & af & tbl & ks & vs & cn & pw &
                     Hm & HtA & HkA & HvA & HcA & Htc & Hlen & Hpw & Hlk & Hlv & Hlc & HKmax & Hu & Hsl & Hnull & Hsz & Htbl & Hkeys & Hrefs & HA).
   set (S := Lv ks 0 (Z.to_nat u)) in *.
   assert (HndS : NoDup S) by apply Lv_NoDup.
@@ -549,7 +549,7 @@ Proof.
   assert (Hkv : kA <> vA) by (intro E; subst; rewrite HkA in HvA; discriminate).
   assert (Hcv : cA <> vA) by (intro E; subst; rewrite HcA in HvA; discriminate).
   split; [|split; [apply (same_upd_obj h vA (OArr (TRef OBJ) vs)); [exact HvA | exact I | exact I] | auto]].
-  exists tA, kA, vA, cA, sz, u, thr, af, tbl, ks, (set_nth_z vs c v), cn, pw.
+  exists tA, kA, vA, cA, sz, u, af, tbl, ks, (set_nth_z vs c v), cn, pw.
   set (X := OArr (TRef OBJ) (set_nth_z vs c v)).
   assert (F1 : upd h vA X m = h m) by (apply upd_other; exact Hmv).
   assert (F2 : upd h vA X tA = h tA) by (apply upd_other; exact Htv).
