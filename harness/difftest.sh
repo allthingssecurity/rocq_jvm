@@ -20,12 +20,14 @@ res=harness/results/$(date -u +%Y-%m-%d).tsv
 rc=0
 while read -r dir cls meth desc opt; do
   [[ -z "$dir" || "$dir" == \#* ]] && continue
-  f="$dir/${cls//.//}.class"
-  tag="$(basename "$dir")-${cls##*.}-$meth"
+  f="${dir%%:*}/${cls//.//}.class"
+  tag="$(basename "${dir%%:*}")-${cls##*.}-$meth"
   in=harness/work/$tag.in
   python3 harness/gen_inputs.py "$desc" "$n" "$seed" > "$in"
   fresh=${FRESH:-}; [[ "${opt:-}" == fresh ]] && fresh=1
-  FRESH=$fresh nice "$JAVA" -Xmx512m -cp harness/work:harness/work/slf4j DiffRunner "$dir" "$cls" "$meth" "$desc" "$in" 2>/dev/null > harness/work/$tag.hs
+  # HotSpot runs only the first directory (the code under test) against the real JDK; further
+  # directories are model classes for the Rocq machine (e.g. java.util models).
+  FRESH=$fresh nice "$JAVA" -Xmx512m -cp harness/work:harness/work/slf4j DiffRunner "${dir%%:*}" "$cls" "$meth" "$desc" "$in" 2>/dev/null > harness/work/$tag.hs
   if [[ "${MODE:-frame}" == machine ]]; then
     nice harness/machine_main.exe "$dir" "$cls" "$meth" "$desc" "$in" "$FUEL" harness/work/unicode-21.txt > harness/work/$tag.md
   else

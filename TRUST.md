@@ -21,10 +21,11 @@ HotSpot on random inputs, and a mismatch is treated as a model bug.
 - `Semantics.v`: one-method small-step interpreter. Instructions without semantics are `Stuck`, and a
   stuck run never yields a result, so an unsupported instruction can make a theorem unprovable but never
   makes a false theorem provable.
-- Not yet modelled (Phase 1): heap, objects, arrays, calls, float/double, exception handlers
-  (a handler that would catch is `Stuck`), threads. Theorems are about methods whose execution
-  stays inside the modelled subset; the proof itself shows this, since a stuck path cannot return a
-  value.
+- `Float.v`: IEEE 754 arithmetic as functions on bit patterns (one rounding function); correct rounding is
+  tested (250,000 inputs per op, 0 mismatches), not proved against real numbers (Flocq is not used).
+- `Machine.v`: the multi-frame machine (heap, arrays, exceptions, calls, class initialisation, lambdas).
+- Not modelled: threads (Track C), reflection, class loaders, natives without a model. A run that needs any of
+  them is `Stuck`, so theorems are only about executions inside the modelled part; the proof itself shows this.
 
 ## 3. The loader
 - `tools/build-camel-classes.sh`: runs `javac --release 17 -g` (JDK 21.0.12) on the Camel sources
@@ -44,6 +45,30 @@ HotSpot on random inputs, and a mismatch is treated as a model bug.
   machine arithmetic is involved) and run against HotSpot (`java` 21.0.12, `DiffRunner` via
   reflection) on the same inputs. Counts per method are in `harness/results/*.tsv` and STATUS.md.
 
-## 5. Axiomatised natives
-None yet (no calls are modelled). From Phase 4 on, each native method or JDK class used by a proof is
-listed here with its Rocq specification and the differential test that checks it.
+## 5. JDK models (specifications of JDK methods, trusted, differentially tested)
+`theories/Jdk/Jdk.v`, `theories/Jdk/Strings.v`. Each modelled method is a Rocq function written from the JDK 21
+source of java.base and checked against HotSpot by the corpora `harness/corpus3` (Strs), `corpus2` (Heap),
+`corpus5` (Lam):
+- `java.lang.String`: length, isEmpty, hashCode, toString, intern, charAt, equals, equalsIgnoreCase (all three
+  JDK code paths: Latin-1, mixed, UTF-16 with surrogate pairs), compareTo, indexOf/lastIndexOf (char and String,
+  with JDK index clamping), contains, startsWith (both), endsWith, concat, substring (both; identity and `""`
+  results as in the JDK), trim, replace(char,char), toCharArray, valueOf(int/long/char/boolean/Object).
+- `java.lang.StringBuilder`: constructors, append(String/Object/CharSequence/int/long/char/boolean), toString,
+  length, charAt, setLength, deleteCharAt, insert(int,String).
+- `java.lang.Character`: toUpperCase/toLowerCase (char and int), isDigit/isLetter/isLetterOrDigit/isWhitespace/
+  isUpperCase/isLowerCase, digit, isHigh/LowSurrogate. **Unicode data is a parameter (`uenv`)**: theorems quantify
+  over all tables, plus explicitly stated facts checked against JDK 21 by `harness/check_unicode_facts.py`.
+- `Integer`/`Long`: parseInt/parseLong (radix 10), toString, compare, Math.max/min/abs, boxing (`valueOf` with the
+  JLS caches, xxxValue, equals, hashCode, toString, compareTo), Boolean.TRUE/FALSE.
+- `java.util.Objects`: requireNonNull, equals (Strings and boxes), hashCode (Strings).
+- `System.arraycopy` (all exception cases, element-wise store check), `Arrays.fill`/`copyOf`, array `clone`.
+- `java.lang.Enum`: constructor, ordinal, name/toString, equals. `Object`: constructor, equals, getClass.
+- slf4j: `LoggerFactory.getLogger` returns an opaque object; `Logger.isXxxEnabled()` comes from the environment
+  (`jenv.j_log_enabled`, theorems state it); every void `Logger` method has no effect on the modelled state.
+- Constructors of the java.lang exception classes: no observable state (messages/causes are not modelled).
+Not modelled on purpose: `Object.hashCode`/`identityHashCode` (nondeterministic), I/O, threads, reflection.
+
+## 6. Test drivers and assumptions stated in theorems
+- `harness/camel/wal-*/WalScenario.java` is our test driver for the whole-class camel-wal theorems.
+- The Unicode facts of `CimSpec.jdk_facts` and of `cih_inconsistent_supplementary` are hypotheses of the
+  theorems, not axioms; `harness/check_unicode_facts.py` checks them against the JDK 21 tables.

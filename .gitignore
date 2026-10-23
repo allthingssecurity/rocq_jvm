@@ -16,3 +16,5 @@ harness/model_main.exe
 *.cmi
 *.cmx
 *.o
+*.exe
+harness/float/_build/

@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 rc=0
 for v in theories/Classes/*.v; do
   f=$(sed -n 's/^   file:   //p' "$v")
+  [[ -z "$f" ]] && continue
   want=$(sed -n 's/^   sha256: //p' "$v")
   got=$(sha256sum "$f" | cut -d' ' -f1)
   hexv=$(sed -n '/^Definition hex/,/%string\./p' "$v" | grep -o '"[0-9a-f]*"' | tr -d '"\n')

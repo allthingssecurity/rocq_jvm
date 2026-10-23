@@ -1,0 +1,2 @@
+classes/cim-fix org.apache.camel.util.CaseInsensitiveMap caseInsensitiveHash (Ljava/lang/String;)I
+classes/cim-main org.apache.camel.util.CaseInsensitiveMap caseInsensitiveHash (Ljava/lang/String;)I

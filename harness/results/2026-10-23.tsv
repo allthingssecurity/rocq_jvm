@@ -188,3 +188,211 @@ time	class	method	desc	inputs	agree	mismatches	hotspot_exceptions	model_stuck	se
 17:25:49	org.rocqjvm.corpus5.Lam	badArray	(I)I	300	300	0	0	0	6
 17:25:50	org.rocqjvm.corpus5.Lam	enumSwitch	(I)I	300	300	0	0	0	6
 17:25:50	org.rocqjvm.corpus5.Lam	predicates	(I)I	300	300	0	0	0	6
+17:32:24	org.rocqjvm.corpus.Ops	wideLongLocals	(J)J	100000	100000	0	0 0	0	2026
+17:32:28	org.rocqjvm.corpus.Ops	i2l	(I)J	100000	100000	0	0 0	0	2026
+17:32:33	org.rocqjvm.corpus.Ops	l2i	(J)I	100000	100000	0	0 0	0	2026
+17:32:36	org.rocqjvm.corpus.Ops	i2b	(I)B	100000	100000	0	0 0	0	2026
+17:32:39	org.rocqjvm.corpus.Ops	i2c	(I)C	100000	100000	0	0 0	0	2026
+17:32:42	org.rocqjvm.corpus.Ops	i2s	(I)S	100000	100000	0	0 0	0	2026
+17:32:46	org.rocqjvm.corpus.Ops	l2b	(J)I	100000	100000	0	0 0	0	2026
+17:32:50	org.rocqjvm.corpus.Ops	ineg	(I)I	100000	100000	0	0 0	0	2026
+17:32:59	org.rocqjvm.corpus.Ops	lneg	(J)J	100000	100000	0	0 0	0	2026
+17:33:06	org.rocqjvm.corpus.Ops	consts	(I)I	100000	100000	0	0 0	0	2026
+17:33:26	org.rocqjvm.corpus.Ops	lconsts	(J)J	100000	100000	0	0 0	0	2026
+17:33:29	org.rocqjvm.corpus.Ops	dense	(I)I	100000	100000	0	0 0	0	2026
+17:33:31	org.rocqjvm.corpus.Ops	sparse	(I)I	100000	100000	0	0 0	0	2026
+17:33:42	org.rocqjvm.corpus.Ops	gcd	(II)I	100000	100000	0	0 0	0	2026
+17:33:56	org.rocqjvm.corpus.Ops	popcount	(I)I	100000	100000	0	0 0	0	2026
+17:34:51	org.rocqjvm.corpus.Ops	lpopcount	(J)J	100000	100000	0	0 0	0	2026
+17:39:18	org.apache.camel.util.CaseInsensitiveMap	caseInsensitiveHash	(Ljava/lang/String;)I	20000	20000	0	971	0	8
+17:39:22	org.apache.camel.util.CaseInsensitiveMap	caseInsensitiveHash	(Ljava/lang/String;)I	20000	20000	0	971	0	8
+17:39:22	org.rocqjvm.corpus2.Heap	arrSum	(I)I	200	200	0	0	0	21
+17:39:23	org.rocqjvm.corpus2.Heap	arrIndex	(II)I	200	200	0	161	0	21
+17:39:25	org.rocqjvm.corpus2.Heap	arrNeg	(I)I	200	143	0	139	57	21
+17:39:25	org.rocqjvm.corpus2.Heap	bytes	(II)I	200	200	0	0	0	21
+17:39:26	org.rocqjvm.corpus2.Heap	chars	(I)I	200	200	0	0	0	21
+17:39:26	org.rocqjvm.corpus2.Heap	shorts	(I)I	200	200	0	0	0	21
+17:39:26	org.rocqjvm.corpus2.Heap	bools	(I)I	200	200	0	0	0	21
+17:39:27	org.rocqjvm.corpus2.Heap	longs	(JI)J	200	200	0	0	0	21
+17:39:27	org.rocqjvm.corpus2.Heap	matrix	(I)I	200	200	0	0	0	21
+17:39:28	org.rocqjvm.corpus2.Heap	nullArray	(I)I	200	200	0	103	0	21
+17:39:28	org.rocqjvm.corpus2.Heap	nullLength	(I)I	200	200	0	109	0	21
+17:39:29	org.rocqjvm.corpus2.Heap	storeCheck	(I)I	200	200	0	97	0	21
+17:39:29	org.rocqjvm.corpus2.Heap	refArray	(II)I	200	200	0	0	0	21
+17:39:30	org.rocqjvm.corpus2.Heap	tableLookup	(I)I	200	200	0	0	0	21
+17:39:30	org.rocqjvm.corpus2.Heap	dispatch	(II)I	200	200	0	0	0	21
+17:39:30	org.rocqjvm.corpus2.Heap	list	(I)I	200	200	0	0	0	21
+17:39:31	org.rocqjvm.corpus2.Heap	cell	(IJ)J	200	200	0	0	0	21
+17:39:31	org.rocqjvm.corpus2.Heap	casts	(I)I	200	200	0	50	0	21
+17:39:32	org.rocqjvm.corpus2.Heap	arrCasts	(I)I	200	200	0	101	0	21
+17:39:32	org.rocqjvm.corpus2.Heap	catchDiv	(II)I	200	200	0	0	0	21
+17:39:33	org.rocqjvm.corpus2.Heap	finallyFlow	(I)I	200	200	0	39	0	21
+17:39:33	org.rocqjvm.corpus2.Heap	myEx	(I)I	200	200	0	20	0	21
+17:39:33	org.rocqjvm.corpus2.Heap	thrower	(I)V	200	200	0	60	0	21
+17:39:34	org.rocqjvm.corpus2.Heap	nested	(II)I	200	200	0	0	0	21
+17:39:34	org.rocqjvm.corpus2.Heap	npe	(I)I	200	200	0	103	0	21
+17:39:35	org.rocqjvm.corpus2.Heap	uncaught	(I)I	200	200	0	70	0	21
+17:39:35	org.rocqjvm.corpus2.Heap	rethrow	(I)I	200	200	0	11	0	21
+17:39:36	org.rocqjvm.corpus2.Heap	classCast	(I)I	200	200	0	103	0	21
+17:39:38	org.rocqjvm.corpus2.Heap	negSize	(I)I	200	143	0	137	57	21
+17:39:39	org.rocqjvm.corpus2.Heap	fib	(I)I	200	200	0	0	0	21
+17:39:40	org.rocqjvm.corpus2.Heap	next	(J)J	200	200	0	0	0	21
+17:39:41	org.rocqjvm.corpus2.Heap	rng	(I)J	200	200	0	0	0	21
+17:39:41	org.rocqjvm.corpus2.Heap	sync	(I)I	200	200	0	0	0	21
+17:39:41	org.rocqjvm.corpus2.Heap	syncThrow	(I)I	200	200	0	0	0	21
+17:39:43	org.rocqjvm.corpus2.Heap	counterInc	(I)I	200	200	0	0	0	21
+17:39:43	org.rocqjvm.corpus3.Strs	len	(Ljava/lang/String;)I	200	200	0	12	0	21
+17:39:44	org.rocqjvm.corpus3.Strs	charAt	(Ljava/lang/String;I)I	200	200	0	190	0	21
+17:39:44	org.rocqjvm.corpus3.Strs	hash	(Ljava/lang/String;)I	200	200	0	12	0	21
+17:39:44	org.rocqjvm.corpus3.Strs	eq	(Ljava/lang/String;Ljava/lang/String;)Z	200	200	0	13	0	21
+17:39:45	org.rocqjvm.corpus3.Strs	eqIC	(Ljava/lang/String;Ljava/lang/String;)Z	200	200	0	13	0	21
+17:39:45	org.rocqjvm.corpus3.Strs	cmp	(Ljava/lang/String;Ljava/lang/String;)I	200	200	0	21	0	21
+17:39:46	org.rocqjvm.corpus3.Strs	idxC	(Ljava/lang/String;I)I	200	200	0	13	0	21
+17:39:46	org.rocqjvm.corpus3.Strs	idxCF	(Ljava/lang/String;II)I	200	200	0	8	0	21
+17:39:47	org.rocqjvm.corpus3.Strs	lidxC	(Ljava/lang/String;I)I	200	200	0	13	0	21
+17:39:47	org.rocqjvm.corpus3.Strs	lidxCF	(Ljava/lang/String;II)I	200	200	0	8	0	21
+17:39:48	org.rocqjvm.corpus3.Strs	idxS	(Ljava/lang/String;Ljava/lang/String;)I	200	200	0	21	0	21
+17:39:48	org.rocqjvm.corpus3.Strs	idxSF	(Ljava/lang/String;Ljava/lang/String;I)I	200	200	0	20	0	21
+17:39:48	org.rocqjvm.corpus3.Strs	lidxS	(Ljava/lang/String;Ljava/lang/String;)I	200	200	0	21	0	21
+17:39:49	org.rocqjvm.corpus3.Strs	lidxSF	(Ljava/lang/String;Ljava/lang/String;I)I	200	200	0	20	0	21
+17:39:49	org.rocqjvm.corpus3.Strs	contains	(Ljava/lang/String;Ljava/lang/String;)Z	200	200	0	21	0	21
+17:39:50	org.rocqjvm.corpus3.Strs	starts	(Ljava/lang/String;Ljava/lang/String;)Z	200	200	0	21	0	21
+17:39:50	org.rocqjvm.corpus3.Strs	startsAt	(Ljava/lang/String;Ljava/lang/String;I)Z	200	200	0	13	0	21
+17:39:51	org.rocqjvm.corpus3.Strs	ends	(Ljava/lang/String;Ljava/lang/String;)Z	200	200	0	21	0	21
+17:39:51	org.rocqjvm.corpus3.Strs	sub1	(Ljava/lang/String;I)Ljava/lang/String;	200	200	0	188	0	21
+17:39:51	org.rocqjvm.corpus3.Strs	sub2	(Ljava/lang/String;II)Ljava/lang/String;	200	200	0	199	0	21
+17:39:52	org.rocqjvm.corpus3.Strs	subSame	(Ljava/lang/String;)Z	200	200	0	12	0	21
+17:39:52	org.rocqjvm.corpus3.Strs	trim	(Ljava/lang/String;)Ljava/lang/String;	200	200	0	12	0	21
+17:39:53	org.rocqjvm.corpus3.Strs	trimSame	(Ljava/lang/String;)Z	200	200	0	12	0	21
+17:39:53	org.rocqjvm.corpus3.Strs	concat	(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;	200	200	0	21	0	21
+17:39:54	org.rocqjvm.corpus3.Strs	replace	(Ljava/lang/String;II)Ljava/lang/String;	200	200	0	8	0	21
+17:39:54	org.rocqjvm.corpus3.Strs	empty	(Ljava/lang/String;)Z	200	200	0	12	0	21
+17:39:54	org.rocqjvm.corpus3.Strs	chars	(Ljava/lang/String;)I	200	200	0	12	0	21
+17:39:55	org.rocqjvm.corpus3.Strs	plus	(Ljava/lang/String;IJLjava/lang/String;)Ljava/lang/String;	200	200	0	0	0	21
+17:39:55	org.rocqjvm.corpus3.Strs	plusNull	(Ljava/lang/String;)Ljava/lang/String;	200	200	0	0	0	21
+17:39:56	org.rocqjvm.corpus3.Strs	valueOfs	(IJI)Ljava/lang/String;	200	200	0	0	0	21
+17:39:56	org.rocqjvm.corpus3.Strs	literals	(I)Z	200	200	0	0	0	21
+17:39:57	org.rocqjvm.corpus3.Strs	sb	(Ljava/lang/String;IJ)Ljava/lang/String;	200	200	0	14	0	21
+17:39:58	org.rocqjvm.corpus3.Strs	sbBad	(I)I	200	143	0	189	57	21
+17:39:59	org.rocqjvm.corpus3.Strs	upper	(I)I	200	200	0	0	0	21
+17:39:59	org.rocqjvm.corpus3.Strs	lower	(I)I	200	200	0	0	0	21
+17:40:00	org.rocqjvm.corpus3.Strs	upperCp	(I)I	200	200	0	0	0	21
+17:40:00	org.rocqjvm.corpus3.Strs	lowerCp	(I)I	200	200	0	0	0	21
+17:40:00	org.rocqjvm.corpus3.Strs	classes	(I)I	200	200	0	0	0	21
+17:40:01	org.rocqjvm.corpus3.Strs	digit	(I)I	200	200	0	0	0	21
+17:40:01	org.rocqjvm.corpus3.Strs	parse	(Ljava/lang/String;)I	200	200	0	197	0	21
+17:40:02	org.rocqjvm.corpus3.Strs	parseL	(Ljava/lang/String;)J	200	200	0	197	0	21
+17:40:02	org.rocqjvm.corpus3.Strs	itos	(IJ)Ljava/lang/String;	200	200	0	0	0	21
+17:40:03	org.rocqjvm.corpus3.Strs	maths	(IIJ)I	200	200	0	0	0	21
+17:40:03	org.rocqjvm.corpus3.Strs	objEq	(Ljava/lang/String;Ljava/lang/String;)Z	200	200	0	0	0	21
+17:40:03	org.rocqjvm.corpus3.Strs	reqNN	(Ljava/lang/String;)I	200	200	0	12	0	21
+17:40:04	org.rocqjvm.corpus3.Strs	copy	(IIII)I	200	200	0	200	0	21
+17:40:04	org.rocqjvm.corpus3.Strs	copyTypes	(I)I	200	200	0	1	0	21
+17:40:05	org.rocqjvm.corpus3.Strs	fills	(III)I	200	200	0	198	0	21
+17:40:08	org.rocqjvm.corpus3.Strs	copyOfs	(I)I	200	143	0	148	57	21
+17:40:08	org.rocqjvm.corpus3.Strs	clones	(I)I	200	200	0	54	0	21
+17:40:09	org.rocqjvm.corpus3.Strs	sw	(Ljava/lang/String;)Ljava/lang/String;	200	200	0	12	0	21
+17:40:09	org.rocqjvm.corpus3.Strs	enums	(I)I	200	200	0	0	0	21
+17:40:10	org.rocqjvm.corpus3.Strs	enumName	(I)Ljava/lang/String;	200	200	0	0	0	21
+17:40:10	org.rocqjvm.corpus4.Flt	fadd	(FF)F	200	200	0	0	0	21
+17:40:11	org.rocqjvm.corpus4.Flt	fsub	(FF)F	200	200	0	0	0	21
+17:40:11	org.rocqjvm.corpus4.Flt	fmul	(FF)F	200	200	0	0	0	21
+17:40:12	org.rocqjvm.corpus4.Flt	fdiv	(FF)F	200	200	0	0	0	21
+17:40:12	org.rocqjvm.corpus4.Flt	frem	(FF)F	200	200	0	0	0	21
+17:40:12	org.rocqjvm.corpus4.Flt	fneg	(F)F	200	200	0	0	0	21
+17:40:13	org.rocqjvm.corpus4.Flt	dadd	(DD)D	200	200	0	0	0	21
+17:40:13	org.rocqjvm.corpus4.Flt	dsub	(DD)D	200	200	0	0	0	21
+17:40:14	org.rocqjvm.corpus4.Flt	dmul	(DD)D	200	200	0	0	0	21
+17:40:14	org.rocqjvm.corpus4.Flt	ddiv	(DD)D	200	200	0	0	0	21
+17:40:14	org.rocqjvm.corpus4.Flt	drem	(DD)D	200	200	0	0	0	21
+17:40:15	org.rocqjvm.corpus4.Flt	dneg	(D)D	200	200	0	0	0	21
+17:40:15	org.rocqjvm.corpus4.Flt	f2i	(F)I	200	200	0	0	0	21
+17:40:16	org.rocqjvm.corpus4.Flt	f2l	(F)J	200	200	0	0	0	21
+17:40:16	org.rocqjvm.corpus4.Flt	f2d	(F)D	200	200	0	0	0	21
+17:40:16	org.rocqjvm.corpus4.Flt	d2i	(D)I	200	200	0	0	0	21
+17:40:17	org.rocqjvm.corpus4.Flt	d2l	(D)J	200	200	0	0	0	21
+17:40:17	org.rocqjvm.corpus4.Flt	d2f	(D)F	200	200	0	0	0	21
+17:40:18	org.rocqjvm.corpus4.Flt	i2f	(I)F	200	200	0	0	0	21
+17:40:18	org.rocqjvm.corpus4.Flt	i2d	(I)D	200	200	0	0	0	21
+17:40:18	org.rocqjvm.corpus4.Flt	l2f	(J)F	200	200	0	0	0	21
+17:40:19	org.rocqjvm.corpus4.Flt	l2d	(J)D	200	200	0	0	0	21
+17:40:19	org.rocqjvm.corpus4.Flt	fcmps	(FF)I	200	200	0	0	0	21
+17:40:19	org.rocqjvm.corpus4.Flt	dcmps	(DD)I	200	200	0	0	0	21
+17:40:20	org.rocqjvm.corpus4.Flt	poly	(DI)D	200	200	0	0	0	21
+17:40:20	org.rocqjvm.corpus4.Flt	consts	(F)F	200	200	0	0	0	21
+17:40:21	org.rocqjvm.corpus4.Flt	dconsts	(D)D	200	200	0	0	0	21
+17:40:21	org.rocqjvm.corpus4.Flt	arrs	(FI)F	200	200	0	0	0	21
+17:40:22	org.rocqjvm.corpus4.Flt	fields	(D)D	200	200	0	0	0	21
+17:40:22	org.rocqjvm.corpus4.Flt	mixed	(IJFD)F	200	200	0	0	0	21
+17:40:23	org.rocqjvm.corpus4.Flt	avg	(JD)J	200	200	0	0	0	21
+17:40:23	org.rocqjvm.corpus5.Lam	nonCapturing	(II)I	200	200	0	0	0	21
+17:40:24	org.rocqjvm.corpus5.Lam	capturing	(II)I	200	200	0	0	0	21
+17:40:24	org.rocqjvm.corpus5.Lam	sameLambda	(I)Z	200	200	0	0	0	21
+17:40:24	org.rocqjvm.corpus5.Lam	staticIface	(II)I	200	200	0	0	0	21
+17:40:25	org.rocqjvm.corpus5.Lam	methodRefs	(I)I	200	200	0	0	0	21
+17:40:25	org.rocqjvm.corpus5.Lam	boxedLambda	(I)I	200	200	0	0	0	21
+17:40:26	org.rocqjvm.corpus5.Lam	boxing	(IJ)I	200	200	0	0	0	21
+17:40:26	org.rocqjvm.corpus5.Lam	unbox	(I)I	200	200	0	0	0	21
+17:40:27	org.rocqjvm.corpus5.Lam	multi	(II)I	200	200	0	0	0	21
+17:40:29	org.rocqjvm.corpus5.Lam	multiNeg	(I)I	200	140	0	143	60	21
+17:40:30	org.rocqjvm.corpus5.Lam	badInit	(I)I	200	200	0	97	0	21
+17:40:31	org.rocqjvm.corpus5.Lam	badTwice	(I)I	200	200	0	0	0	21
+17:40:31	org.rocqjvm.corpus5.Lam	badArray	(I)I	200	200	0	0	0	21
+17:40:32	org.rocqjvm.corpus5.Lam	enumSwitch	(I)I	200	200	0	0	0	21
+17:40:32	org.rocqjvm.corpus5.Lam	predicates	(I)I	200	200	0	0	0	21
+17:41:06	org.rocqjvm.corpus.Ops	sumTo	(I)I	100000	100000	0	0 0	0	2026
+17:42:16	org.rocqjvm.corpus.Ops	collatz	(I)I	100000	100000	0	0 0	0	2026
+17:42:26	org.rocqjvm.corpus.Ops	hash	(III)I	100000	100000	0	0 0	0	2026
+17:42:52	org.rocqjvm.corpus.Ops	lhash	(JJ)J	100000	100000	0	0 0	0	2026
+17:43:00	org.rocqjvm.corpus.Ops	chain	(II)I	100000	100000	0	0 0	0	2026
+17:43:16	org.rocqjvm.corpus.Ops	lchain	(JJ)J	100000	100000	0	0 0	0	2026
+17:43:22	org.rocqjvm.corpus.Ops	logic	(IIII)Z	100000	100000	0	0 0	0	2026
+17:43:26	org.rocqjvm.corpus.Ops	ternary	(II)I	100000	100000	0	0 0	0	2026
+17:43:32	org.rocqjvm.corpus.Ops	divs	(II)I	100000	100000	0	5072 0	0	2026
+17:43:43	org.rocqjvm.corpus.Ops	ldivs	(JJ)J	100000	100000	0	5016 0	0	2026
+17:43:56	org.rocqjvm.corpus.Ops	mixed	(IJ)I	100000	100000	0	0 0	0	2026
+17:43:58	org.rocqjvm.corpus.Ops	voidm	(I)V	100000	100000	0	0 0	0	2026
+17:44:03	org.rocqjvm.corpus.Ops	deadline	(III)I	100000	100000	0	0 0	0	2026
+17:44:09	org.apache.camel.component.wal.TransactionLog	canUpdate	(IIII)Z	100000	100000	0	0 0	0	2026
+17:44:14	org.apache.camel.component.wal.TransactionLog	canUpdate	(IIII)Z	100000	100000	0	0 0	0	2026
+17:44:22	StackOps	pop	(II)J	100000	100000	0	0 0	0	2026
+17:44:32	StackOps	pop2_f1	(III)J	100000	100000	0	0 0	0	2026
+17:44:42	StackOps	pop2_f2	(IJ)J	100000	100000	0	0 0	0	2026
+17:44:53	StackOps	dup	(I)J	100000	100000	0	0 0	0	2026
+17:45:10	StackOps	dup_x1	(II)J	100000	100000	0	0 0	0	2026
+17:45:32	StackOps	dup_x2_f1	(III)J	100000	100000	0	0 0	0	2026
+17:45:53	StackOps	dup_x2_f2	(JI)J	100000	100000	0	0 0	0	2026
+17:46:13	StackOps	dup2_f1	(II)J	100000	100000	0	0 0	0	2026
+17:46:29	StackOps	dup2_f2	(J)J	100000	100000	0	0 0	0	2026
+17:46:55	StackOps	dup2_x1_f1	(III)J	100000	100000	0	0 0	0	2026
+17:47:16	StackOps	dup2_x1_f2	(IJ)J	100000	100000	0	0 0	0	2026
+17:47:48	StackOps	dup2_x2_f1	(IIII)J	100000	100000	0	0 0	0	2026
+17:48:15	StackOps	dup2_x2_f2	(IIJ)J	100000	100000	0	0 0	0	2026
+17:49:02	StackOps	dup2_x2_f3	(JII)J	100000	100000	0	0 0	0	2026
+17:49:27	StackOps	dup2_x2_f4	(JJ)J	100000	100000	0	0 0	0	2026
+17:49:39	StackOps	swap	(II)J	100000	100000	0	0 0	0	2026
+17:51:51	org.rocqjvm.jdkmodel.Smoke	one	(I)I	300	300	0	0	0	1
+17:54:42	org.rocqjvm.jdkmodel.MapOps	hashMap	(I)I	100	100	0	0	0	1
+17:54:54	org.rocqjvm.jdkmodel.MapOps	linkedHashMap	(I)I	100	100	0	0	0	1
+17:55:19	org.rocqjvm.jdkmodel.MapOps	treeBins	(I)I	100	100	0	0	0	1
+17:55:58	org.rocqjvm.jdkmodel.MapOps	copies	(I)I	100	100	0	0	0	1
+17:56:06	org.rocqjvm.jdkmodel.MapOps	ctor	(II)I	100	100	0	0	0	1
+18:02:44	org.rocqjvm.jdkmodel.SetOps	sets	(I)I	100	46	0	0	54	1
+18:02:47	org.rocqjvm.jdkmodel.ListOps	arrayList	(II)I	100	63	0	0	37	1
+18:02:49	org.rocqjvm.jdkmodel.AbsOps	abstractList	(II)I	100	24	0	0	76	1
+18:02:55	org.rocqjvm.jdkmodel.AbsOps	abstractMap	(I)I	100	100	0	0	0	1
+18:02:56	org.rocqjvm.jdkmodel.CollOps	collections	(II)I	100	100	0	2	0	1
+18:03:27	org.rocqjvm.jdkmodel.SetOps	sets	(I)I	100	100	0	0	0	2
+18:03:30	org.rocqjvm.jdkmodel.ListOps	arrayList	(II)I	100	100	0	0	0	2
+18:03:34	org.rocqjvm.jdkmodel.AbsOps	abstractList	(II)I	100	100	0	0	0	2
+18:03:39	org.rocqjvm.jdkmodel.AbsOps	abstractMap	(I)I	100	100	0	0	0	2
+18:03:41	org.rocqjvm.jdkmodel.CollOps	collections	(II)I	100	100	0	2	0	2
+18:09:18	org.rocqjvm.jdkmodel.Sizing	sizing	(II)I	100	100	0	0	0	4
+18:09:19	org.rocqjvm.jdkmodel.MapOps	tieBreak	(I)I	100	0	0	0	100	4
+18:09:21	org.rocqjvm.jdkmodel.MapOps	strings	(I)Ljava/lang/String;	100	0	100	0	0	4
+18:10:04	org.rocqjvm.jdkmodel.MapOps	treeBins	(I)I	100	100	0	0	0	4
+18:10:26	org.rocqjvm.jdkmodel.Sizing	sizing	(II)I	100	100	0	0	0	4
+18:10:53	org.rocqjvm.jdkmodel.MapOps	strings	(I)Ljava/lang/String;	200	0	0	0	200	4
+18:11:09	org.rocqjvm.jdkmodel.MapOps	strings	(I)Ljava/lang/String;	200	200	0	0	0	4
+18:17:03	org.rocqjvm.corpus2.Heap	arrSum	(I)I	10000	10000	0	0	0	2027
+18:17:05	org.rocqjvm.corpus2.Heap	arrIndex	(II)I	10000	10000	0	8143	0	2027

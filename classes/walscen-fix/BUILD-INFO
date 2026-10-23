@@ -1,0 +1,13 @@
+label: wal-fix
+repo: https://github.com/apache/camel.git
+commit: e72996b974ad97f55b3ba3f73497adbf27a6609d
+module: components/camel-wal/src/main/java
+sources: org/apache/camel/component/wal/TransactionLog.java
+javac: javac 21.0.12.1 --release 17 -g
+built: 2026-10-23T16:11:34Z
+sha256:
+  71fc2304a637086516fe1674da602a82c4f0f80a2abfbd209ed588a9de94bba7  ./org/apache/camel/component/wal/LogEntry$EntryState.class
+  61360967aba30b501dcc6e300b0832627359c7d73181470e03a8d43312e0a02e  ./org/apache/camel/component/wal/LogEntry.class
+  2c002633e3bf77890118251cf68462eec23a18e9beab962b115346f0e6dcfc02  ./org/apache/camel/component/wal/TransactionLog$EntryContainer.class
+  abe8c775718c57d400035a336fdc5f3535873e1482b5ec06ad6887b4feb27a1b  ./org/apache/camel/component/wal/TransactionLog$LayerInfo.class
+  1de5da80d4da1b968e60eee9b6af1342bd0fb4dbe9d0f1934a2a945531978ca1  ./org/apache/camel/component/wal/TransactionLog.class

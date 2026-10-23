@@ -1,0 +1,15 @@
+# java.util model classes (classes/jdkmodel) vs the real JDK 21: operation-sequence tests.
+# Build: harness/jdkmodel/build.sh   Run: MODE=machine FUEL=2000000 harness/difftest.sh harness/targets-jdkmodel.txt 10000 <seed>
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps hashMap (I)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps linkedHashMap (I)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps treeBins (I)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps copies (I)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps ctor (II)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SetOps sets (I)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ListOps arrayList (II)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.AbsOps abstractList (II)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.AbsOps abstractMap (I)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CollOps collections (II)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.Sizing sizing (II)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps tieBreak (I)I
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps strings (I)Ljava/lang/String;

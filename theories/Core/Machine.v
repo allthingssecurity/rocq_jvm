@@ -349,6 +349,27 @@ Definition with_frames (s : mstate) (fs : list cframe) : mstate :=
   {| ms_heap := ms_heap s; ms_next := ms_next s; ms_statics := ms_statics s;
      ms_inited := ms_inited s; ms_locks := ms_locks s; ms_frames := fs |}.
 
+(** ** String/Class interning (JVMS 5.1: equal literals denote the same object). *)
+Definition hexd (d : Z) : Ascii.ascii := Ascii.ascii_of_nat (Z.to_nat (if d <? 10 then 48 + d else 87 + d)).
+Definition unit_key (u : Z) : string :=
+  String (hexd (u / 4096 mod 16)) (String (hexd (u / 256 mod 16))
+    (String (hexd (u / 16 mod 16)) (String (hexd (u mod 16)) EmptyString))).
+Definition intern_key (o : object) : string :=
+  match o with
+  | OStr u => "#s:" ++ fold_right (fun c acc => unit_key c ++ acc) "" u
+  | OCls n => "#c:" ++ n
+  | _ => "#other"
+  end.
+
+Definition intern (s : mstate) (o : object) : Z * mstate :=
+  let k := intern_key o in
+  match assoc k (ms_statics s) with
+  | Some (VRef l) => (l, s)
+  | _ => let (l, s1) := alloc s o in
+         (l, {| ms_heap := ms_heap s1; ms_next := ms_next s1; ms_statics := (k, VRef l) :: ms_statics s1;
+                ms_inited := ms_inited s1; ms_locks := ms_locks s1; ms_frames := ms_frames s1 |})
+  end.
+
 Definition set_frame (c : cframe) (f : frame) : cframe :=
   {| cf_class := cf_class c; cf_method := cf_method c; cf_code := cf_code c; cf_rt := cf_rt c;
      cf_frame := f; cf_resume := cf_resume c; cf_clinit := cf_clinit c |}.
@@ -424,14 +445,15 @@ Definition AIOOBE := "java/lang/ArrayIndexOutOfBoundsException".
 Fixpoint erroneous (p : program) (fuel : nat) (statics : list (string * value)) (c : string) : bool :=
   match fuel with
   | O => false
-  | S k => match assoc ("#err:" ++ c) statics with
-           | Some _ => true
-           | None => match find_class p c with
-                     | Some cf => match cf_super cf with Some sup => erroneous p k statics sup | None => false end
-                     | None => false
-                     end
+  | S k => match find_class p c with
+           | None => false          (* JDK classes are never initialised by the machine *)
+           | Some cf => match assoc ("#err:" ++ c) statics with
+                        | Some _ => true
+                        | None => match cf_super cf with Some sup => erroneous p k statics sup | None => false end
+                        end
            end
   end.
+
 (** The outermost loaded superclass of [c] (or [c] itself) whose
     initialisation has not started; [None] if none (all started or not loaded). *)
 Fixpoint init_needed (p : program) (fuel : nat) (inited : list string) (c : string) : option classfile :=
@@ -452,19 +474,23 @@ Fixpoint init_needed (p : program) (fuel : nat) (inited : list string) (c : stri
     end
   end.
 
-Definition cp_constant_value (cf : classfile) (m : member) (t : jtype) : option value :=
+Definition cp_constant_value (cf : classfile) (m : member) (t : jtype) : option (value + list Z) :=
   match find_attr "ConstantValue" (mb_attrs m) with
-  | None => Some (default_of t)
+  | None => Some (inl (default_of t))
   | Some (hi :: lo :: _) =>
       match cp_get (cf_cp cf) (hi * 256 + lo), t with
-      | Some (CPInt z), (TBool | TByte | TChar | TShort | TInt) => Some (VInt z)
-      | Some (CPLong z), TLong => Some (VLong z)
-      | _, _ => None     (* String / float / double constants: later phases *)
+      | Some (CPInt z), (TBool | TByte | TChar | TShort | TInt) => Some (inl (VInt z))
+      | Some (CPLong z), TLong => Some (inl (VLong z))
+      | Some (CPFloat b), TFloat => Some (inl (VFloat b))
+      | Some (CPDouble b), TDouble => Some (inl (VDouble b))
+      | Some (CPString u), TRef _ => let* raw := cp_utf8 (cf_cp cf) u in
+                                     let* units := utf8_units raw in Some (inr units)
+      | _, _ => None
       end
   | Some _ => None
   end.
 
-Definition static_inits (cf : classfile) : option (list (string * value)) :=
+Definition static_inits (cf : classfile) : option (list (string * (value + list Z))) :=
   fold_right (fun m acc =>
     match acc with
     | None => None
@@ -478,6 +504,19 @@ Definition static_inits (cf : classfile) : option (list (string * value)) :=
       else Some l
     end) (Some nil) (cf_fields cf).
 
+(** Set the static fields; String constants are interned (JVMS 5.5 step 6 / 4.7.2). *)
+Fixpoint put_statics (s : mstate) (l : list (string * (value + list Z))) : mstate :=
+  match l with
+  | nil => s
+  | (k, inl v) :: r => let s' := put_statics s r in
+                       {| ms_heap := ms_heap s'; ms_next := ms_next s'; ms_statics := (k, v) :: ms_statics s';
+                          ms_inited := ms_inited s'; ms_locks := ms_locks s'; ms_frames := ms_frames s' |}
+  | (k, inr u) :: r => let s' := put_statics s r in
+                       let (loc, s'') := intern s' (OStr u) in
+                       {| ms_heap := ms_heap s''; ms_next := ms_next s''; ms_statics := (k, VRef loc) :: ms_statics s'';
+                          ms_inited := ms_inited s''; ms_locks := ms_locks s''; ms_frames := ms_frames s'' |}
+  end.
+
 (** Start initialising [cf]: mark it, set its static fields, and push its
     <clinit> (if any) on top of the current frames; the triggering
     instruction is re-executed when it returns. *)
@@ -485,9 +524,10 @@ Definition start_init (s : mstate) (cf : classfile) : mstep :=
   match static_inits cf with
   | None => MStuck "static field initial value not supported yet"
   | Some sts =>
-    let s1 := {| ms_heap := ms_heap s; ms_next := ms_next s; ms_statics := app sts (ms_statics s);
-                 ms_inited := cf_this cf :: ms_inited s; ms_locks := ms_locks s;
-                 ms_frames := ms_frames s |} in
+    let s0 := put_statics s sts in
+    let s1 := {| ms_heap := ms_heap s0; ms_next := ms_next s0; ms_statics := ms_statics s0;
+                 ms_inited := cf_this cf :: ms_inited s0; ms_locks := ms_locks s0;
+                 ms_frames := ms_frames s0 |} in
     match find_method cf "<clinit>" "()V" with
     | None => MNext s1
     | Some m =>
@@ -665,27 +705,6 @@ Definition akind_load_ok (k : akind) (e : jtype) : bool :=
 Fixpoint lock_count (ls : list (Z * Z)) (l : Z) : Z :=
   match ls with nil => 0 | (k, n) :: r => if Z.eqb k l then n else lock_count r l end.
 
-(** ** String/Class interning (JVMS 5.1: equal literals denote the same object). *)
-Definition hexd (d : Z) : Ascii.ascii := Ascii.ascii_of_nat (Z.to_nat (if d <? 10 then 48 + d else 87 + d)).
-Definition unit_key (u : Z) : string :=
-  String (hexd (u / 4096 mod 16)) (String (hexd (u / 256 mod 16))
-    (String (hexd (u / 16 mod 16)) (String (hexd (u mod 16)) EmptyString))).
-Definition intern_key (o : object) : string :=
-  match o with
-  | OStr u => "#s:" ++ fold_right (fun c acc => unit_key c ++ acc) "" u
-  | OCls n => "#c:" ++ n
-  | _ => "#other"
-  end.
-
-Definition intern (s : mstate) (o : object) : Z * mstate :=
-  let k := intern_key o in
-  match assoc k (ms_statics s) with
-  | Some (VRef l) => (l, s)
-  | _ => let (l, s1) := alloc s o in
-         (l, {| ms_heap := ms_heap s1; ms_next := ms_next s1; ms_statics := (k, VRef l) :: ms_statics s1;
-                ms_inited := ms_inited s1; ms_locks := ms_locks s1; ms_frames := ms_frames s1 |})
-  end.
-
 (** The recipe and constants of a StringConcatFactory.makeConcatWithConstants call site. *)
 Definition concat_recipe (cf : classfile) (bi : Z) : option (list Z * list (list Z)) :=
   let* bms := bootstrap_methods cf in
@@ -766,6 +785,16 @@ Definition concat_units (h : heap) (recipe : list Z) (consts : list (list Z)) (p
            (args : list value) : string + list Z :=
   concat_go (S (length recipe)) h recipe consts ps args.
 
+(** Instructions executed by the frame-local interpreter [Semantics.step]. *)
+Definition is_local_instr (i : instr) : bool :=
+  match i with
+  | New _ | Getfield _ | Putfield _ | Getstatic _ | Putstatic _ | Newarray _ | Anewarray _
+  | Arraylength | ALoadArr _ | AStoreArr _ | Athrow | Checkcast _ | Instanceof _
+  | Monitorenter | Monitorexit | Invoke _ _ | Ldc (LdcString _) | Ldc (LdcClass _)
+  | Invokedynamic _ _ _ | Multianewarray _ _ => false
+  | _ => true
+  end.
+
 (** ** Method invocation (shared by invoke* and by calls through lambda objects).
     [args] are the popped arguments (receiver first), [r] the rest of the
     caller's operand stack, [nx] the pc after the invoke. *)
@@ -776,24 +805,79 @@ Definition invoke_kind_of_ref (kind : Z) : option invoke_kind :=
   else if kind =? 7 then Some InvSpecial  (* REF_invokeSpecial: private instance methods *)
   else None.                              (* REF_newInvokeSpecial (Foo::new): not yet *)
 
+Definition invoke_frame_go (top : cframe) (rest : list cframe) (nx : pc) (st' : list value) (s' : mstate) : mstep :=
+  if stack_slots st' <=? c_max_stack (cf_code top)
+  then MNext (with_frames s' (set_frame top (mkframe nx st' (f_locals (cf_frame top))) :: rest))
+  else MStuck "operand stack overflow (max_stack)".
+
+Definition invoke_run_model (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
+           (mr : methodref) (args r : list value) (nx : pc) (cls : string) : mstep :=
+  match mdl cls (mr_name mr) (mr_desc mr) args s with
+  | MOk v s' => invoke_frame_go top rest nx (match v with Some w => w :: r | None => r end)
+                                 (with_frames s' (ms_frames s))
+  | MThrow cn => throw_new p s cn
+  | MStuckModel why => MStuck why
+  | MNoModel => MStuck ("no model for " ++ cls ++ "." ++ mr_name mr ++ mr_desc mr)
+  end.
+
+(** Virtual / interface / special call on the object [ho] found at the receiver.
+    [recur] performs a call through a lambda object (with less fuel). *)
+Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
+           (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
+           (k : invoke_kind) (mr : methodref) (l : Z) (more : list value) (ho : option object)
+           (r : list value) (nx : pc) : mstep :=
+  let f := cf_frame top in
+  let caller := set_frame top (mkframe (f_pc f) r (f_locals f)) in
+  let args := VRef l :: more in
+  match ho with
+  | Some (OLam iface sam kind impl cap) =>
+      if negb (match k with InvSpecial => true | _ => false end) && String.eqb (mr_name mr) sam then
+        match invoke_kind_of_ref kind with
+        | Some k' => recur k' impl (app cap more)
+        | None => MStuck "lambda: constructor references are not modelled yet"
+        end
+      else
+        match resolve_full p iface (mr_name mr) (mr_desc mr) with
+        | Some (cn, m) => enter s caller rest cn m args nx
+        | None => MStuck ("method " ++ mr_name mr ++ " on a lambda object is not modelled")
+        end
+  | _ =>
+    let start := match k with
+                 | InvSpecial => Some (mr_class mr)
+                 | _ => match ho with
+                        | Some (OObj cn _) => Some cn
+                        | Some (OArr _ _) => Some "java/lang/Object"
+                        | Some (OStr _) => Some "java/lang/String"
+                        | Some (OSb _) => Some "java/lang/StringBuilder"
+                        | Some (OCls _) => Some "java/lang/Class"
+                        | Some (OLam i _ _ _ _) => Some i
+                        | None => None
+                        end
+                 end in
+    match start with
+    | None => MStuck "invoke: dangling receiver"
+    | Some cn0 =>
+      match resolve_full p cn0 (mr_name mr) (mr_desc mr) with
+      | Some (cn, m) =>
+          if Z.testbit (m_access m) 8 then invoke_run_model p mdl s top rest mr args r nx cn
+          else enter s caller rest cn m args nx
+      | None =>
+          (* not in a loaded class: the model of the first JDK class on the
+             receiver's superclass chain (e.g. java/lang/Enum for an enum), else
+             the model of the method as declared *)
+          let jc := first_unloaded p 64 cn0 in
+          match mdl jc (mr_name mr) (mr_desc mr) args s with
+          | MNoModel => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+          | _ => invoke_run_model p mdl s top rest mr args r nx jc
+          end
+      end
+    end
+  end.
+
 Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
          (k : invoke_kind) (mr : methodref) (args r : list value) (nx : pc) : mstep :=
-  let c := cf_code top in
   let f := cf_frame top in
-  let lv := f_locals f in
-  let h := ms_heap s in
-  let go st' s' :=
-      if stack_slots st' <=? c_max_stack c
-      then MNext (with_frames s' (set_frame top (mkframe nx st' lv) :: rest))
-      else MStuck "operand stack overflow (max_stack)" in
-  let caller := set_frame top (mkframe (f_pc f) r lv) in
-  let run_model cls :=
-      match mdl cls (mr_name mr) (mr_desc mr) args s with
-      | MOk v s' => go (match v with Some w => w :: r | None => r end) (with_frames s' (ms_frames s))
-      | MThrow cn => throw_new p s cn
-      | MStuckModel why => MStuck why
-      | MNoModel => MStuck ("no model for " ++ cls ++ "." ++ mr_name mr ++ mr_desc mr)
-      end in
+  let caller := set_frame top (mkframe (f_pc f) r (f_locals f)) in
   match k with
   | InvStatic =>
       if erroneous p 64 (ms_statics s) (mr_class mr) then throw_new p s "java/lang/NoClassDefFoundError" else
@@ -802,61 +886,21 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
       | None =>
         match resolve_full p (mr_class mr) (mr_name mr) (mr_desc mr) with
         | Some (cn, m) =>
-            if Z.testbit (m_access m) 8 then run_model cn
+            if Z.testbit (m_access m) 8 then invoke_run_model p mdl s top rest mr args r nx cn
             else enter s caller rest cn m args nx
-        | None => run_model (mr_class mr)
+        | None => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
         end
       end
   | InvSpecial | InvVirtual | InvInterface =>
       match args with
       | VNull :: _ => throw_new p s NPE
       | VRef l :: more =>
-          match h l with
-          | Some (OLam iface sam kind impl cap) =>
-              if negb (match k with InvSpecial => true | _ => false end) && String.eqb (mr_name mr) sam then
-                match fuel, invoke_kind_of_ref kind with
-                | S fu, Some k' => do_invoke fu p mdl s top rest k' impl (app cap more) r nx
-                | _, None => MStuck "lambda: constructor references are not modelled yet"
-                | O, _ => MStuck "lambda: nesting"
-                end
-              else
-                (* another method on a lambda object: a default method of a loaded interface *)
-                match resolve_full p iface (mr_name mr) (mr_desc mr) with
-                | Some (cn, m) => enter s caller rest cn m args nx
-                | None => MStuck ("method " ++ mr_name mr ++ " on a lambda object is not modelled")
-                end
-          | ho =>
-          let start := match k with
-                       | InvSpecial => Some (mr_class mr)
-                       | _ => match ho with
-                              | Some (OObj cn _) => Some cn
-                              | Some (OArr _ _) => Some "java/lang/Object"
-                              | Some (OStr _) => Some "java/lang/String"
-                              | Some (OSb _) => Some "java/lang/StringBuilder"
-                              | Some (OCls _) => Some "java/lang/Class"
-                              | Some (OLam i _ _ _ _) => Some i
-                              | None => None
-                              end
-                       end in
-          match start with
-          | None => MStuck "invoke: dangling receiver"
-          | Some cn0 =>
-            match resolve_full p cn0 (mr_name mr) (mr_desc mr) with
-            | Some (cn, m) =>
-                if Z.testbit (m_access m) 8 then run_model cn
-                else enter s caller rest cn m args nx
-            | None =>
-                (* not in a loaded class: the model of the first JDK class on the
-                   receiver's superclass chain (e.g. java/lang/Enum for an enum), else
-                   the model of the method as declared *)
-                let jc := first_unloaded p 64 cn0 in
-                match mdl jc (mr_name mr) (mr_desc mr) args s with
-                | MNoModel => run_model (mr_class mr)
-                | _ => run_model jc
-                end
-            end
-          end
-          end
+          let recur k' impl args' :=
+              match fuel with
+              | S fu => do_invoke fu p mdl s top rest k' impl args' r nx
+              | O => MStuck "lambda: nesting"
+              end in
+          invoke_obj recur p mdl s top rest k mr l more (ms_heap s l) r nx
       | _ => MStuck "invoke: receiver is not a reference"
       end
   end.
@@ -927,6 +971,15 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
   | None => MStuck "no instruction at pc"
   | Some (i, nx) =>
     let go st' s' := put_top (mkframe nx st' lv) s' in
+    if is_local_instr i then
+      (* ---- the Phase 1 frame-local semantics ---- *)
+      match step c (cf_rt top) f with
+      | Normal f' => put_top f' s
+      | Done v => if cf_clinit top then return_to s None rest else return_to s v rest
+      | Throw cn => throw_new p s cn
+      | Stuck why => MStuck why
+      end
+    else
     match i with
     (* ---- objects ---- *)
     | New cn =>
@@ -1210,14 +1263,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                  end
         | None => MStuck "multianewarray: operand stack"
         end
-    (* ---- everything else: the Phase 1 frame-local semantics ---- *)
-    | _ =>
-        match step c (cf_rt top) f with
-        | Normal f' => put_top f' s
-        | Done v => if cf_clinit top then return_to s None rest else return_to s v rest
-        | Throw cn => throw_new p s cn
-        | Stuck why => MStuck why
-        end
+    | _ => MStuck "unreachable: frame-local instruction"
     end
   end
   end.

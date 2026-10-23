@@ -1,5 +1,5 @@
 (* Differential driver for the machine with the JDK models (heap, calls, exceptions, <clinit>, Strings).
-   machine_main <classdir> <binary class name> <method> <descriptor> <inputs> <fuel> [unicode-table]
+   machine_main <classdir[:classdir...]> <binary class name> <method> <descriptor> <inputs> <fuel> [unicode-table]
    Loads every .class under <classdir>; each input line is one fresh run.
    Arguments: decimal ints/longs; Strings as "s:<4 hex digits per UTF-16 unit>" or "null".
    Output: "V <n>" | "V void" | "V null" | "S <hex units>" | "E <class>" | "STUCK <why>" | "FUEL". *)
@@ -52,7 +52,8 @@ let () =
   and name = Sys.argv.(3) and desc = Sys.argv.(4) and inp = Sys.argv.(5) in
   let fuel = nat_of_int (int_of_string Sys.argv.(6)) in
   if Array.length Sys.argv > 7 then load_tables Sys.argv.(7);
-  let files = class_files dir |> List.map (fun f ->
+  (* <classdir> may be a ':'-separated list of directories; the first definition of a class wins *)
+  let files = String.split_on_char ':' dir |> List.concat_map class_files |> List.map (fun f ->
     let d = In_channel.with_open_bin f In_channel.input_all in
     List.init (String.length d) (fun i -> z_of_int (Char.code d.[i]))) in
   let prog = match load_program files with Some p -> p | None -> prerr_endline "a class file did not parse"; exit 2 in

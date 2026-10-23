@@ -1,0 +1,13 @@
+label: wal-main
+repo: https://github.com/apache/camel.git
+commit: 36bebb520a632d0d02a90680bba60e2a1e3941f9
+module: components/camel-wal/src/main/java
+sources: org/apache/camel/component/wal/TransactionLog.java
+javac: javac 21.0.12.1 --release 17 -g
+built: 2026-10-23T16:11:28Z
+sha256:
+  71fc2304a637086516fe1674da602a82c4f0f80a2abfbd209ed588a9de94bba7  ./org/apache/camel/component/wal/LogEntry$EntryState.class
+  61360967aba30b501dcc6e300b0832627359c7d73181470e03a8d43312e0a02e  ./org/apache/camel/component/wal/LogEntry.class
+  11a1b60a85ce8c9f49e5bee0141ba595f8b3d738cac995c22553d83bea0fd184  ./org/apache/camel/component/wal/TransactionLog$EntryContainer.class
+  abe8c775718c57d400035a336fdc5f3535873e1482b5ec06ad6887b4feb27a1b  ./org/apache/camel/component/wal/TransactionLog$LayerInfo.class
+  3431a587c95ab5ceea9bf853fd7d2131251b9dbe4cba2fdd5a39d3d2e4c01c4b  ./org/apache/camel/component/wal/TransactionLog.class
