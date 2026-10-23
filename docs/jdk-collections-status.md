@@ -146,21 +146,41 @@ groups of 7, mixed), `Integer` (small, multiples of 16/64, `id<<16`, negative), 
 equal hash codes, tree bins ordered by `compareTo`), `Long` (`a<<32|b`: equal hash codes `a^b`, tree
 bins ordered by `Long.compareTo`), `null` keys and values.
 
-COUNTS_TABLE
+Results (`harness/results/2026-10-23.tsv` (UTC date), seed 1, 10,000 inputs per target, `FUEL=2000000`, final
+build of `classes/jdkmodel` as recorded in its `BUILD-INFO`):
 
-Canaries (deliberately wrong models, `harness/jdkmodel/build.sh canary <name>`, 100 inputs per
-selected target, seed 99) are all detected:
+| target | what it exercises | inputs | agree | mismatches | STUCK |
+|---|---|---|---|---|---|
+| `MapOps.hashMap(I)I` | 40 random ops on `HashMap()/(n)/(n,lf)`: every Map method incl. defaults and compute*, the 3 views and their iterators (remove, misuse -> ISE/NSEE), fail-fast after put/remove/get/clear, `setValue`, `putAll`, copy + `equals`/`hashCode`, view `removeIf`/`removeAll`/`retainAll`, a mapping function that modifies the map | 10,000 | 10,000 | 0 | 0 |
+| `MapOps.linkedHashMap(I)I` | the same on `LinkedHashMap` (insertion order, access order, LRU subclass with `removeEldestEntry`) | 10,000 | 10,000 | 0 | 0 |
+| `MapOps.treeBins(I)I` | 20-80 insertions of colliding keys (K with `id<<4`, `id<<6`, ...; equal-hash Strings; equal-hash Longs; null) into HashMap/LinkedHashMap: treeify, tree insert/remove, split and untreeify on resize, iterator remove (non-movable), entries held across treeify/untreeify | 10,000 | 10,000 | 0 | 0 |
+| `MapOps.copies(I)I` | `HashMap(Map)`/`LinkedHashMap(Map)` pre-sizing, `putAll` into empty/non-empty maps, equals/hashCode across kinds, view equality, `toArray`, view identity | 10,000 | 10,000 | 0 | 0 |
+| `MapOps.ctor(II)I` | constructor checks (negative capacity, load factor 0/-1/NaN/0.05/0.1/2.5/100), capacity rounding, thresholds | 10,000 | 10,000 | 0 | 0 |
+| `Sizing.sizing(II)I` | table length for sizes from the input (0-199), via iteration order of keys `i<<s`: copy constructors, `putAll`, `HashSet(Collection)`, `HashMap(n)`, compute*/merge resizing before insertion | 10,000 | 10,000 | 0 | 0 |
+| `MapOps.strings(I)Ljava/lang/String;` | `toString` of maps, views, lists, sets, unmodifiable map, `asList`, self-references | 10,000 | 10,000 | 0 | 0 |
+| `ViewOps.views(I)I` | `forEach` of maps and views, `replaceAll`, `forEachRemaining`, `removeIf` with modification of the map/list/set from inside the callback | 10,000 | 10,000 | 0 | 0 |
+| `SetOps.sets(I)I` | `HashSet`/`LinkedHashSet` (all constructors): add/remove/contains, iterators, fail-fast, `addAll/removeAll/retainAll/containsAll`, equals/hashCode, `removeIf`, `toArray` | 10,000 | 10,000 | 0 | 0 |
+| `ListOps.arrayList(II)I` | 40 random ops on `ArrayList`: index exceptions at -1/size/size+1/input, iterators and list iterators (all operations and misuse), fail-fast incl. `ensureCapacity`/`trimToSize`, bulk ops, `removeIf`, `forEach` with modification, `replaceAll`, equals/hashCode vs ArrayList and `asList`, `toArray` | 10,000 | 10,000 | 0 | 0 |
+| `AbsOps.abstractList(II)I` | a user `AbstractList` subclass (mutable or not): AbstractList's `Itr`/`ListItr`, `indexOf`, `clear`/`removeRange`, `addAll(int,..)`, equals/hashCode, UOE defaults | 10,000 | 10,000 | 0 | 0 |
+| `AbsOps.abstractMap(I)I` | a user `AbstractMap` subclass (entry set over SimpleEntry/SimpleImmutableEntry): get/containsKey/remove/keySet/values/equals/hashCode and all Map default methods | 10,000 | 10,000 | 0 | 0 |
+| `CollOps.collections(II)I` | `Collections.empty*`, `singleton*`, `unmodifiable*` (all mutators -> UOE, views follow the backing collection, no double wrapping, null -> NPE), `Arrays.asList` (write-through, AIOOBE, ArrayStoreException, `toArray` types), Rocq `Arrays.fill/copyOf` beside `asList` | 10,000 | 10,000 (353 with an exception escaping, same class on both sides) | 0 | 0 |
+| `MapOps.tieBreak(I)I` | the documented STUCK case (equal hash codes, non-Comparable keys in a tree bin) | 10,000 | 0 | 0 | 10,000 (`System.identityHashCode`, by design) |
 
-| canary | mutation | detected by (mismatching inputs) |
+Total: 140,000 inputs, 130,000 agreements, **0 mismatches**, 10,000 STUCK (all in `tieBreak`).
+
+Canaries (deliberately wrong models, `CANARY_N=100 CANARY_TARGETS=... harness/jdkmodel/build.sh canary <name>`,
+100 inputs per selected target, input seed 99, final test build) are all detected:
+
+| canary | mutation | mismatching inputs per target |
 |---|---|---|
-| `nospread` | `HashMap.hash` without `h ^ (h >>> 16)` (a different bin index function) | hashMap 56/100, linkedHashMap 52/100, treeBins 31/100, copies 36/100, ctor 32/100 |
-| `rootfront` | tree bins: root not moved to the front of the bin list | treeBins 24/100, hashMap 1/100 |
-| `cia-tail` | `computeIfAbsent/compute/merge` append instead of prepend | hashMap 40/100, treeBins 56/100 (linkedHashMap 0/100: its order does not depend on bins) |
-| `lhm-access` | access-ordered `LinkedHashMap.get` does not bump `modCount` | linkedHashMap 10/100 |
+| `nospread` | `HashMap.hash` without `h ^ (h >>> 16)` (a different bin index function) | hashMap 48/100, linkedHashMap 32/100, treeBins 15/100, copies 33/100, sets 38/100 (sizing 0/100: its keys have no high hash bits) |
+| `rootfront` | tree bins: root not moved to the front of the bin list | treeBins 32/100, hashMap 3/100 |
+| `cia-tail` | `computeIfAbsent/compute/merge` append instead of prepend | hashMap 43/100, treeBins 52/100 (linkedHashMap 0/100: its order does not depend on bins) |
+| `lhm-access` | access-ordered `LinkedHashMap.get` does not bump `modCount` | linkedHashMap 10/100, views 9/100 |
 | `al-iobe` | `ArrayList.get(-1)` throws `ArrayIndexOutOfBoundsException` | arrayList 96/100 |
 
-(The `nospread` numbers are from an early run with seed 7 through `difftest.sh`; those rows were removed
-from `harness/results/2026-10-23.tsv` because they are not results for the real model.)
+In addition, `Sizing.sizing` was checked against a scratch model with the pre-JDK-19 pre-sizing
+formulas: 13 of 300 inputs mismatch.
 
 Note on `harness/results/2026-10-23.tsv`: the development row `MapOps strings ... 100 mismatches` (18:09)
 is **not** a model mismatch: the test passed `Arrays.asList(1, null, "x")`, whose varargs array is a

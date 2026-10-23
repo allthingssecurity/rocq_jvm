@@ -264,4 +264,158 @@ Proof.
     + reflexivity.
 Qed.
 
+
+(** ** remove *)
+Lemma rm_match_shape : forall h ks q L prev p c, rm_match e h ks q prev L = Some (p, c) ->
+  (exists L', L = c :: L' /\ p = prev) \/ (exists A L', L = app A (p :: c :: L')).
+Proof.
+  intros h ks q L. induction L as [|s L IH]; intros prev p c H; cbn in H; [discriminate|].
+  destruct (key_at h ks s) as [u|]; [|discriminate].
+  destruct (eqic e u q).
+  - injection H as <- <-. left. eauto.
+  - destruct (IH s p c H) as [(L' & -> & ->) | (A & L' & ->)].
+    + right. exists [], L'. reflexivity.
+    + right. exists (s :: A), L'. reflexivity.
+Qed.
+
+Lemma rm_match_found : forall h ks q L prev p c, rm_match e h ks q prev L = Some (p, c) ->
+  In c L /\ exists u, key_at h ks c = Some u /\ eqic e u q = true.
+Proof.
+  intros h ks q L. induction L as [|s L IH]; intros prev p c H; cbn in H; [discriminate|].
+  destruct (key_at h ks s) as [u|] eqn:Ek; [|discriminate].
+  destruct (eqic e u q) eqn:E.
+  - injection H as <- <-. split; [left; reflexivity | eauto].
+  - destruct (IH s p c H) as (H1 & H2). split; [right; exact H1 | exact H2].
+Qed.
+
+Lemma chain_inv : forall cn i L, chain cn i L -> 0 <= i -> exists j L', L = i :: L' /\ nth_z cn i = Some (VInt j) /\ chain cn j L'.
+Proof. intros cn i L H Hi. inversion H; subst; [lia | eauto]. Qed.
+
+Lemma chain_unlink_mid : forall cn A p c L' i j,
+  chain cn i (app A (p :: c :: L')) -> NoDup (app A (p :: c :: L')) -> nth_z cn c = Some (VInt j) ->
+  chain (set_nth_z cn p (VInt j)) i (app A (p :: L')).
+Proof.
+  induction A as [|a A IH]; intros p c L' i j H Hnd Hc; cbn in *.
+  - inversion H as [|i0 j0 L0 Hi Hn Hch]; subst.
+    inversion Hch as [|i1 j1 L1 Hi1 Hn1 Hch1]; subst.
+    rewrite Hc in Hn1. injection Hn1 as <-.
+    inversion Hnd as [|x l Hx Hnd']; subst. inversion Hnd' as [|y l' Hy Hnd'']; subst.
+    econstructor; [exact Hi | apply nth_set_same; pose proof (nth_z_bounds _ _ _ Hn); lia |].
+    apply chain_set_out; [exact Hch1 | intro Hin; apply Hx; right; exact Hin].
+  - inversion H as [|i0 j0 L0 Hi Hn Hch]; subst.
+    inversion Hnd as [|x l Hx Hnd']; subst.
+    econstructor; [exact Hi | | eapply IH; [exact Hch | exact Hnd' | exact Hc]].
+    rewrite nth_set_other; [exact Hn|]. intro E; subst. apply Hx. apply in_or_app. right. left. reflexivity.
+Qed.
+
+Lemma NoDup_app_remove_mid : forall (A : list Z) x L, NoDup (app A (x :: L)) -> NoDup (app A L) /\ ~ In x (app A L).
+Proof.
+  intros A x L H. split.
+  - eapply NoDup_remove_1. exact H.
+  - eapply NoDup_remove_2. exact H.
+Qed.
+
+
+Lemma in_rm_iff : forall (S : list Z) c s, In s (remove Z.eq_dec c S) <-> In s S /\ s <> c.
+Proof. intros. split; [intro H; split; [eapply in_remove; exact H | intro E; subst; eapply remove_In; exact H] | intros (H1 & H2); apply in_in_remove; assumption]. Qed.
+
+(** remove of a present key: the slot is unlinked from its chain and cleared. *)
+Theorem remove_ok : forall h ks cn tbl pw S q i p c j,
+  tbl_ok h ks cn tbl pw S -> keys_ok h ks S -> good q -> 0 <= pw -> (length cn <= length ks)%nat ->
+  nth_z tbl (bucket q pw) = Some (VInt i) ->
+  rm_walk e h ks cn q (-1) i (Datatypes.S (length ks)) = Some (Some (p, c)) ->
+  nth_z cn c = Some (VInt j) ->
+  holds h ks S q c /\
+  tbl_ok h (set_nth_z ks c VNull)
+    (if p =? -1 then cn else set_nth_z cn p (VInt j))
+    (if p =? -1 then set_nth_z tbl (bucket q pw) (VInt j) else tbl) pw (remove Z.eq_dec c S) /\
+  keys_ok h (set_nth_z ks c VNull) (remove Z.eq_dec c S).
+Proof.
+  intros h ks cn tbl pw S q i p c j (Hkd & Ht) Hk Hq Hpw Hlc Hi Hw Hj.
+  set (b := bucket q pw) in *.
+  assert (Hbb : 0 <= b < 2 ^ pw) by (unfold b, bucket; apply Z.mod_pos_bound; apply Z.pow_pos_nonneg; lia).
+  destruct (Ht b Hbb) as (i' & L & Hi' & Hc & Hnd & Hmem). rewrite Hi in Hi'. injection Hi' as <-.
+  assert (Hsub : forall s, In s L -> In s S) by (intros s Hs; apply Hmem in Hs; tauto).
+  assert (HkL : keyed h ks L) by (intros s Hs; apply Hkd, Hsub, Hs).
+  assert (HlenL : (length L < Datatypes.S (length ks))%nat).
+  { pose proof (nodup_len_bound L (length cn) Hnd (chain_bounds cn i L Hc)). lia. }
+  rewrite (rm_walk_chain e h ks cn q i L (Datatypes.S (length ks)) (-1) Hc HkL HlenL) in Hw. injection Hw as Hw.
+  destruct (rm_match_found h ks q L (-1) p c Hw) as (HcL & uc & Huc & Euc).
+  assert (HcS : In c S) by (apply Hsub; exact HcL).
+  assert (Hcb : bucket uc pw = b).
+  { apply Hmem in HcL as (_ & u' & Hu' & Eb). rewrite Huc in Hu'. injection Hu' as <-. exact Eb. }
+  assert (Hkey : forall s, s <> c -> key_at h (set_nth_z ks c VNull) s = key_at h ks s)
+    by (intros s Hs; apply key_at_set_other; exact Hs).
+  assert (Hnokey : forall s, In s L -> s <> c -> In s (remove Z.eq_dec c S)).
+  { intros s Hs Hsc. apply in_rm_iff. split; [apply Hsub; exact Hs | exact Hsc]. }
+  (* membership of the other buckets does not involve c *)
+  assert (Hother : forall b', 0 <= b' < 2 ^ pw -> b' <> b -> forall i2 L2, nth_z tbl b' = Some (VInt i2) -> chain cn i2 L2 ->
+             (forall s, In s L2 <-> In s S /\ exists ku, key_at h ks s = Some ku /\ bucket ku pw = b') ->
+             ~ In c L2 /\ (forall s, In s L2 <-> In s (remove Z.eq_dec c S) /\ exists ku, key_at h (set_nth_z ks c VNull) s = Some ku /\ bucket ku pw = b')).
+  { intros b' Hb' Hne i2 L2 Hi2 Hc2 Hm2.
+    assert (HcL2 : ~ In c L2).
+    { intro H. apply Hm2 in H as (_ & u' & Hu' & Eb). rewrite Huc in Hu'. injection Hu' as <-. congruence. }
+    split; [exact HcL2|]. intros s. split.
+    - intros Hs. assert (Hsc : s <> c) by (intro E; subst; contradiction).
+      apply Hm2 in Hs as (HS & ku & Hku & Eb). split; [apply in_rm_iff; auto|]. rewrite Hkey by exact Hsc. eauto.
+    - intros (HS & ku & Hku & Eb). apply in_rm_iff in HS as (HS & Hsc). rewrite Hkey in Hku by exact Hsc.
+      apply Hm2. eauto. }
+  split; [split; [exact HcS | exists uc; auto]|].
+  split.
+  - split.
+    + intros s Hs. apply in_rm_iff in Hs as (Hs & Hsc). rewrite Hkey by exact Hsc. apply Hkd. exact Hs.
+    + intros b' Hb'.
+      destruct (rm_match_shape h ks q L (-1) p c Hw) as [(L' & HL & ->) | (A & L' & HL)].
+      * (* c was the head of the chain *)
+        cbn [Z.eqb Pos.eqb]. subst L.
+        assert (Hic : i = c) by (inversion Hc; reflexivity). subst i.
+        destruct (Z.eq_dec b' b) as [->|Hne].
+        -- exists j, L'. split; [apply nth_set_same; pose proof (nth_z_bounds _ _ _ Hi); lia|].
+           destruct (chain_inv cn c (c :: L') Hc ltac:(inversion Hc; lia)) as (j' & L'' & HE & Hn & Hc').
+           injection HE as <-. rewrite Hj in Hn. injection Hn as <-.
+           split; [exact Hc'|]. inversion Hnd as [|x l Hx Hnd']; subst. split; [exact Hnd'|].
+           intros s. split.
+           ++ intros Hs. assert (Hsc : s <> c) by (intro E; subst; contradiction).
+              assert (Hs' : In s (c :: L')) by (right; exact Hs). apply Hmem in Hs' as (HS & ku & Hku & Eb).
+              split; [apply in_rm_iff; auto|]. rewrite Hkey by exact Hsc. eauto.
+           ++ intros (HS & ku & Hku & Eb). apply in_rm_iff in HS as (HS & Hsc). rewrite Hkey in Hku by exact Hsc.
+              assert (Hs' : In s (c :: L')) by (apply Hmem; eauto). destruct Hs' as [E|Hs']; [congruence | exact Hs'].
+        -- destruct (Ht b' Hb') as (i2 & L2 & Hi2 & Hc2 & Hnd2 & Hm2).
+           exists i2, L2. split; [cbn [Pos.eqb]; rewrite nth_set_other by congruence; exact Hi2|].
+           split; [exact Hc2|]. split; [exact Hnd2|].
+           apply (Hother b' Hb' Hne i2 L2 Hi2 Hc2 Hm2).
+      * (* c follows p *)
+        assert (Hp : 0 <= p) by (pose proof (chain_bounds cn i L Hc p ltac:(rewrite HL; apply in_or_app; right; left; reflexivity)); lia).
+        replace (p =? -1) with false by (symmetry; apply Z.eqb_neq; lia).
+        assert (HpL : In p L) by (rewrite HL; apply in_or_app; right; left; reflexivity).
+        destruct (Z.eq_dec b' b) as [->|Hne].
+        -- exists i, (app A (p :: L')). split; [exact Hi|].
+           split; [apply (chain_unlink_mid cn A p c L' i j); [rewrite <- HL; exact Hc | rewrite <- HL; exact Hnd | exact Hj]|].
+           assert (Hnd3 : NoDup (app (app A [p]) (c :: L'))) by (rewrite <- app_assoc; cbn; rewrite <- HL; exact Hnd).
+           destruct (NoDup_app_remove_mid (app A [p]) c L' Hnd3) as (Hnd4 & Hcn).
+           rewrite <- app_assoc in Hnd4, Hcn. cbn in Hnd4, Hcn.
+           split; [exact Hnd4|].
+           intros s. split.
+           ++ intros Hs. assert (Hsc : s <> c) by (intro E; subst; contradiction).
+              assert (Hs' : In s L) by (rewrite HL; apply in_app_or in Hs as [Hs|[<-|Hs]]; apply in_or_app;
+                                        [left; exact Hs | right; left; reflexivity | right; right; right; exact Hs]).
+              apply Hmem in Hs' as (HS & ku & Hku & Eb).
+              split; [apply in_rm_iff; auto|]. rewrite Hkey by exact Hsc. eauto.
+           ++ intros (HS & ku & Hku & Eb). apply in_rm_iff in HS as (HS & Hsc). rewrite Hkey in Hku by exact Hsc.
+              assert (Hs' : In s L) by (apply Hmem; eauto). rewrite HL in Hs'.
+              apply in_app_or in Hs' as [Hs'|[<-|[E|Hs']]]; apply in_or_app;
+                [left; exact Hs' | right; left; reflexivity | congruence | right; right; exact Hs'].
+        -- destruct (Ht b' Hb') as (i2 & L2 & Hi2 & Hc2 & Hnd2 & Hm2).
+           exists i2, L2. split; [exact Hi2|].
+           assert (HpL2 : ~ In p L2).
+           { intro H. apply Hm2 in H as (_ & u2 & Hu2 & Eb2). apply Hmem in HpL as (_ & u3 & Hu3 & Eb3).
+             rewrite Hu2 in Hu3. injection Hu3 as <-. congruence. }
+           split; [apply chain_set_out; assumption|]. split; [exact Hnd2|].
+           apply (Hother b' Hb' Hne i2 L2 Hi2 Hc2 Hm2).
+  - destruct Hk as (Hg & Hd). split.
+    + intros s Hs. apply in_rm_iff in Hs as (Hs & Hsc). rewrite Hkey by exact Hsc. apply Hg. exact Hs.
+    + intros s1 s2 u1 u2 H1 H2 K1 K2 E. apply in_rm_iff in H1 as (H1 & H1c). apply in_rm_iff in H2 as (H2 & H2c).
+      rewrite Hkey in K1 by exact H1c. rewrite Hkey in K2 by exact H2c. eapply Hd; eauto.
+Qed.
+
 End Table.

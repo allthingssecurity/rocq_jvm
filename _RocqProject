@@ -69,6 +69,7 @@ theories/Camel/CimPut2.v
 theories/Camel/CimRemove.v
 theories/Camel/CimCompact.v
 theories/Camel/CimPut3.v
+theories/Camel/CimAbs.v
 theories/Camel/WalUpdate.v
 theories/Camel/WalUpdateSpec.v
 theories/Camel/WalAdd.v
