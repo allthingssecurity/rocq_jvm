@@ -422,4 +422,148 @@ Proof.
       intros s0 Hs0. apply in_rm_iff in Hs0 as (Hs0 & Hne). apply Lv_range in Hs0. split; [lia | exact Hne].
 Qed.
 
+
+(** ** put *)
+Fixpoint a_mem (h : heap) (A : list (Z * value)) (q : list Z) : bool :=
+  match A with
+  | [] => false
+  | (k, _) :: r => match kunits h k with Some u => eqic e u q || a_mem h r q | None => a_mem h r q end
+  end.
+
+Fixpoint a_set (h : heap) (A : list (Z * value)) (q : list Z) (v : value) : list (Z * value) :=
+  match A with
+  | [] => []
+  | (k, w) :: r => match kunits h k with Some u => if eqic e u q then (k, v) :: r else (k, w) :: a_set h r q v | None => (k, w) :: a_set h r q v end
+  end.
+
+Lemma a_mem_entries : forall h ks vs S q, keyed h ks S ->
+  forall S', (forall s, In s S' -> In s S) ->
+  (a_mem h (entries ks vs S') q = true <-> exists s, In s S' /\ holds e h ks S q s).
+Proof.
+  intros h ks vs S q Hkd S'. induction S' as [|s0 S' IH]; intros Hsub.
+  - split; [discriminate | intros (s & [] & _)].
+  - destruct (Hkd s0 (Hsub s0 (or_introl eq_refl))) as (u0 & Hu0).
+    cbn [entries map a_mem]. rewrite (key_at_ref h ks s0 u0 Hu0).
+    specialize (IH (fun x Hx => Hsub x (or_intror Hx))).
+    rewrite orb_true_iff, IH. split.
+    + intros [E|(s & Hs & Hh)]; [exists s0; split; [left; reflexivity | split; [apply Hsub; left; reflexivity | exists u0; auto]] | exists s; split; [right; exact Hs | exact Hh]].
+    + intros (s & [<-|Hs] & Hh); [left; destruct Hh as (_ & u & Hu & E); rewrite Hu0 in Hu; injection Hu as <-; exact E | right; exists s; auto].
+Qed.
+
+Lemma nth_set_nat_same : forall (l : list value) i w d, 0 <= i -> (Z.to_nat i < length l)%nat ->
+  nth (Z.to_nat i) (set_nth_z l i w) d = w.
+Proof.
+  induction l as [|x r IHl]; intros i w d Hi Hil; cbn in Hil; [lia|]. cbn [set_nth_z].
+  destruct (Z.eqb_spec i 0) as [->|Hne']; [reflexivity|].
+  replace (Z.to_nat i) with (S (Z.to_nat (i - 1))) by lia. cbn. apply IHl; lia.
+Qed.
+
+Lemma a_set_entries : forall h ks vs S q v,
+  keys_ok e good h ks S -> keyed h ks S -> good q ->
+  forall S', (forall s, In s S' -> In s S) -> (forall s, In s S' -> 0 <= s) -> NoDup S' ->
+  forall c, In c S' -> holds e h ks S q c -> (Z.to_nat c < length vs)%nat ->
+  a_set h (entries ks vs S') q v = entries ks (set_nth_z vs c v) S'.
+Proof.
+  intros h ks vs S q v Hk Hkd Hq S'. induction S' as [|s0 S' IH]; intros Hsub Hpos Hnd c Hc Hh Hcl; [destruct Hc|].
+  inversion Hnd as [|x l Hx Hnd']; subst.
+  destruct (Hkd s0 (Hsub s0 (or_introl eq_refl))) as (u0 & Hu0).
+  cbn [entries map a_set]. rewrite (key_at_ref h ks s0 u0 Hu0).
+  pose proof Hh as (HS & u & Hu & Eu).
+  assert (Hrest : forall S'', (forall s, In s S'' -> 0 <= s /\ s <> c) -> entries ks (set_nth_z vs c v) S'' = entries ks vs S'').
+  { intros S''. induction S'' as [|s1 S'' IH2]; intros H2; [reflexivity|]. cbn [entries map].
+    destruct (H2 s1 (or_introl eq_refl)) as (P1 & P2). f_equal.
+    - f_equal. apply nth_set_nat_other; [apply Hpos; exact Hc | exact P1 | congruence].
+    - apply IH2. intros x0 Hx0. apply H2. right. exact Hx0. }
+  destruct (Z.eq_dec s0 c) as [->|Hne].
+  - rewrite Hu0 in Hu. injection Hu as <-. rewrite Eu. f_equal.
+    + f_equal. symmetry. apply nth_set_nat_same; [apply Hpos; left; reflexivity | exact Hcl].
+    + symmetry. apply Hrest. intros x0 Hx0. split; [apply Hpos; right; exact Hx0 | intro E; subst; contradiction].
+  - destruct (eqic e u0 q) eqn:E.
+    + exfalso. destruct Hk as (Hg & Hd).
+      destruct (Hg s0 (Hsub s0 (or_introl eq_refl))) as (u0' & Hu0' & G0). rewrite Hu0 in Hu0'. injection Hu0' as <-.
+      destruct (Hg c HS) as (u' & Hu' & G). rewrite Hu in Hu'. injection Hu' as <-.
+      assert (E2 : eqic e u0 u = true) by (apply (eq_trans u0 q u); auto; rewrite eq_sym by assumption; exact Eu).
+      apply Hne. eapply Hd; [apply Hsub; left; reflexivity | exact HS | exact Hu0 | exact Hu | exact E2].
+    + f_equal.
+      * f_equal. symmetry. apply nth_set_nat_other; [apply Hpos; exact Hc | apply Hpos; left; reflexivity | congruence].
+      * apply IH; try assumption.
+        -- intros x0 Hx0. apply Hsub. right. exact Hx0.
+        -- intros x0 Hx0. apply Hpos. right. exact Hx0.
+        -- destruct Hc as [E'|Hc]; [congruence | exact Hc].
+Qed.
+
+
+Lemma allrefs_set : forall vs c v, allrefs vs -> (match v with VNull | VRef _ => true | _ => false end) = true ->
+  allrefs (set_nth_z vs c v).
+Proof.
+  intros vs c v H Hv i w Hi. destruct (Z.eq_dec i c) as [->|Hne].
+  - destruct (Z_lt_le_dec c 0).
+    + exfalso. apply nth_z_bounds in Hi. lia.
+    + destruct (Nat.lt_ge_cases (Z.to_nat c) (length vs)).
+      * rewrite nth_set_same in Hi by lia. injection Hi as <-. exact Hv.
+      * apply nth_z_bounds in Hi. rewrite set_nth_len in Hi. lia.
+  - rewrite nth_set_other in Hi by congruence. apply (H i w Hi).
+Qed.
+
+Theorem put_present_map : forall h n sts ini lk m k ku v A K,
+  cim_rep h m A K ->
+  h k = Some (OStr ku) -> slen ku <= INT_MAX -> good ku ->
+  erroneous cp 64 sts CIM = false -> init_needed cp 64 ini CIM = None -> assoc KNOWN sts = Some VNull ->
+  vok h v -> a_mem h A ku = true ->
+  returns cp (mdl e) {| ms_heap := h; ms_next := n; ms_statics := sts; ms_inited := ini; ms_locks := lk;
+                         ms_frames := [put_frame m k v] |}
+    (Some (a_get h A ku))
+    (fun s' => cim_rep (ms_heap s') m (a_set h A ku v) K /\ same_strings h (ms_heap s') /\
+               ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
+Proof.
+  intros h n sts ini lk m k ku v A K Hrep Hk Hmax Hg He Hi HK Hv Hmem.
+  destruct Hrep as (tA & kA & vA & cA & sz & u & thr & af & tbl & ks & vs & cn & pw &
+                    Hm & HtA & HkA & HvA & HcA & Htc & Hlen & Hpw & Hlk & Hlv & Hlc & HKmax & Hu & Hsl & Hnull & Hsz & Htbl & Hkeys & Hrefs & HA).
+  set (S := Lv ks 0 (Z.to_nat u)) in *.
+  assert (HndS : NoDup S) by apply Lv_NoDup.
+  destruct (find_correct e good eq_hash h ks cn tbl pw S ku Htbl Hkeys Hg ltac:(lia)) as (i & L & Hb & Hc & HlL & Hres).
+  pose proof Htbl as (Hkd & Ht).
+  assert (Hbb : 0 <= bucket e ku pw < 2 ^ pw) by (unfold bucket; apply Z.mod_pos_bound; apply Z.pow_pos_nonneg; lia).
+  destruct (Ht _ Hbb) as (i' & L' & Hb' & Hc' & Hnd' & Hm').
+  rewrite Hb in Hb'. injection Hb' as <-. assert (HL : L = L') by (eapply chain_unique; eassumption). subst L'.
+  assert (HkL : keyed h ks L) by (intros s Hs; apply Hkd; apply Hm' in Hs; tauto).
+  assert (Hw : fi_walk e h ks cn ku i (Datatypes.S (length ks)) = Some (first_match e h ks ku L))
+    by (apply fi_walk_chain; [exact Hc | exact HkL | lia]).
+  subst A. apply (a_mem_entries h ks vs S ku Hkd S (fun s Hs => Hs)) in Hmem as (c0 & Hc0 & Hh0).
+  set (c := first_match e h ks ku L) in *.
+  assert (Hhold : holds e h ks S ku c) by (destruct Hres as [(_ & H2) | H1]; [exfalso; exact (H2 c0 Hh0) | exact H1]).
+  assert (HcS : In c S) by (destruct Hhold; assumption).
+  assert (Hcr : 0 <= c < u) by (apply Lv_range in HcS; lia).
+  destruct (nth_z_exists vs c ltac:(rewrite Hlv; lia)) as (old & Hold).
+  assert (Hval : nth (Z.to_nat c) vs VNull = old) by (apply nth_z_nth; exact Hold).
+  destruct (a_get_entries h ks vs S ku Hkeys Hkd Hg S (fun s Hs => Hs)) as (_ & G2).
+  rewrite (G2 c HcS Hhold), Hval.
+  assert (Hvr : (match v with VNull | VRef _ => true | _ => false end) = true) by (destruct v; try contradiction; reflexivity).
+  eapply returns_weaken.
+  { apply (put_present e h n sts ini lk m k v tA kA vA cA sz u thr af tbl ks vs cn pw ku i c old); try assumption.
+    - lia.
+    - exact (Hrefs c old Hold). }
+  intros s' (P1 & P2 & P3 & P4). rewrite P1.
+  assert (Hmv : m <> vA) by (intro E; subst; rewrite Hm in HvA; discriminate).
+  assert (Htv : tA <> vA) by (intro E; subst; rewrite HtA in HvA; discriminate).
+  assert (Hkv : kA <> vA) by (intro E; subst; rewrite HkA in HvA; discriminate).
+  assert (Hcv : cA <> vA) by (intro E; subst; rewrite HcA in HvA; discriminate).
+  split; [|split; [apply (same_upd_obj h vA (OArr (TRef OBJ) vs)); [exact HvA | exact I | exact I] | auto]].
+  exists tA, kA, vA, cA, sz, u, thr, af, tbl, ks, (set_nth_z vs c v), cn, pw.
+  set (X := OArr (TRef OBJ) (set_nth_z vs c v)).
+  assert (F1 : upd h vA X m = h m) by (apply upd_other; exact Hmv).
+  assert (F2 : upd h vA X tA = h tA) by (apply upd_other; exact Htv).
+  assert (F3 : upd h vA X kA = h kA) by (apply upd_other; exact Hkv).
+  assert (F4 : upd h vA X cA = h cA) by (apply upd_other; exact Hcv).
+  rewrite F1, F2, F3, F4, upd_same.
+  refine (conj Hm (conj HtA (conj HkA (conj eq_refl (conj HcA (conj Htc (conj Hlen (conj Hpw (conj Hlk _))))))))).
+  rewrite set_nth_len. refine (conj Hlv (conj Hlc (conj HKmax (conj Hu (conj Hsl (conj Hnull (conj Hsz _))))))).
+  split; [apply (tbl_ok_same h); [apply same_upd_obj with (OArr (TRef OBJ) vs); [exact HvA | exact I | exact I] | exact Htbl]|].
+  split; [apply (keys_ok_same h); [apply same_upd_obj with (OArr (TRef OBJ) vs); [exact HvA | exact I | exact I] | exact Hkeys]|].
+  split; [apply allrefs_set; assumption|].
+  apply (a_set_entries h ks vs S ku v Hkeys Hkd Hg S (fun s Hs => Hs)); try assumption.
+  - intros s0 Hs0. apply Lv_range in Hs0. lia.
+  - rewrite Hlv. lia.
+Qed.
+
 End Map.
