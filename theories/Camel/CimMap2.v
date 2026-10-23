@@ -22,6 +22,9 @@ Proof.
   rewrite IH by (intros p Hp; apply H; lia). reflexivity.
 Qed.
 
+Ltac hfr_arrays := let x := fresh "x" in let Hx := fresh "Hx" in
+  intros x Hx; cbn [In] in Hx; repeat (destruct Hx as [<-|Hx]; [do 2 eexists; eassumption|]); destruct Hx.
+
 Section Map2.
 Variable e : jenv.
 Variable good : list Z -> Prop.
@@ -37,7 +40,7 @@ Theorem put_new_free_map : forall h n sts ini lk m k ku v
   h m = Some (OObj CIM (cim_fields tA kA vA cA sz u thr af)) ->
   h tA = Some (OArr TInt tbl) -> h kA = Some (OArr (TRef STR) ks) ->
   h vA = Some (OArr (TRef OBJ) vs) -> h cA = Some (OArr TInt cn) -> tA <> cA ->
-  Z.of_nat (length tbl) = 2 ^ pw -> 0 <= pw <= 30 ->
+  Z.of_nat (length tbl) = 2 ^ pw -> 0 <= pw <= 20 ->
   length vs = length ks -> length cn = length ks -> Z.of_nat (length ks) <= MAX_ARRAY ->
   0 <= u -> slots_ok ks 0 (Z.to_nat u) ->
   (forall q, u <= q < Z.of_nat (length ks) -> nth_z ks q = Some VNull) ->
@@ -53,7 +56,8 @@ Theorem put_new_free_map : forall h n sts ini lk m k ku v
                          ms_frames := [put_frame m k v] |}
     (Some VNull)
     (fun s' => cim_rep e good (ms_heap s') m (app (entries ks vs (Lv ks 0 (Z.to_nat u))) [(k, v)]) (length ks) thr /\
-               same_strings (ms_heap s') h /\ ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
+               same_strings (ms_heap s') h /\ hframe h (ms_heap s') m n (ms_next s') /\
+               ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
   intros h n sts ini lk m k ku v tA kA vA cA sz u af tbl ks vs cn pw thr
          Hm HtA HkA HvA HcA Htc Hlen Hpw Hlv Hlc HKmax Hu0 Hsl Hnull Hsz Htbl Hkeys Hrefs
@@ -95,7 +99,9 @@ Proof.
     destruct (Z.eq_dec y tA) as [->|N5]; [rewrite P5, HtA; split; discriminate|].
     rewrite P6 by assumption. reflexivity. }
   assert (Hsame' : same_strings h h') by (intros y u0; symmetry; apply Hsame).
-  split; [|split; [exact Hsame | auto]].
+  split; [|split; [exact Hsame | split; [|auto]]].
+  2: { rewrite P7. apply (hframe_gen h h' m n n [kA; vA; cA; tA]); [lia | rewrite Hm; discriminate | hfr_arrays |].
+       intros y Y1 Y2 _. apply P6; [exact Y1| | | |]; intro E; apply Y2; rewrite E; cbn [In]; tauto. }
   assert (HLv' : Lv (set_nth_z ks u (VRef k)) 0 (Z.to_nat (u + 1)) = app S [u]).
   { replace (Z.to_nat (u + 1)) with (Datatypes.S (Z.to_nat u)) by lia. rewrite Lv_snoc.
     replace (0 + Z.of_nat (Z.to_nat u)) with u by lia. rewrite nth_set_same by lia. cbn [nonnull].

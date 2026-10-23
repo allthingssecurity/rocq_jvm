@@ -81,7 +81,7 @@ Definition cim_rep (h : heap) (m : Z) (A : list (Z * value)) (K : nat) (thr : Z)
     h m = Some (OObj CIM (cim_fields tA kA vA cA sz u thr af)) /\
     h tA = Some (OArr TInt tbl) /\ h kA = Some (OArr (TRef STR) ks) /\
     h vA = Some (OArr (TRef OBJ) vs) /\ h cA = Some (OArr TInt cn) /\ tA <> cA /\
-    Z.of_nat (length tbl) = 2 ^ pw /\ 0 <= pw <= 30 /\
+    Z.of_nat (length tbl) = 2 ^ pw /\ 0 <= pw <= 20 /\
     length ks = K /\ length vs = K /\ length cn = K /\ Z.of_nat K <= MAX_ARRAY /\
     0 <= u <= Z.of_nat K /\ slots_ok ks 0 (Z.to_nat u) /\
     (forall q, u <= q < Z.of_nat K -> nth_z ks q = Some VNull) /\
@@ -212,6 +212,38 @@ Qed.
 (** Heaps that hold the same strings. *)
 Definition same_strings (h h' : heap) : Prop := forall y u, h y = Some (OStr u) <-> h' y = Some (OStr u).
 
+(** No object at or above [n]. *)
+Definition fresh (h : heap) (n : Z) : Prop := forall y, n <= y -> h y = None.
+
+(** An object that is not the map and not an array. *)
+Definition plain (h : heap) (m y : Z) : Prop := y <> m /\ exists o, h y = Some o /\ (forall t es, o <> OArr t es).
+
+(** What a call leaves alone: every plain object, and the free part of the heap above the new
+    allocation pointer. *)
+Definition hframe (h h' : heap) (m n n' : Z) : Prop :=
+  fresh h n -> (forall y, plain h m y -> h' y = h y) /\ fresh h' n'.
+
+Lemma hframe_refl : forall h m n, hframe h h m n n.
+Proof. intros h m n Hf. split; [reflexivity | exact Hf]. Qed.
+
+Lemma hframe_gen : forall h h' m n n' xs, n <= n' -> h m <> None ->
+  (forall x, In x xs -> exists t es, h x = Some (OArr t es)) ->
+  (forall y, y <> m -> ~ In y xs -> (y < n \/ n' <= y) -> h' y = h y) -> hframe h h' m n n'.
+Proof.
+  intros h h' m n n' xs Hn Hm Hx Hf Hfr. split.
+  - intros y (Hy & o & Ho & Hna). apply Hf; [exact Hy | | ].
+    + intros Hin. destruct (Hx y Hin) as (t & es & E). rewrite Ho in E. injection E as E. exact (Hna t es E).
+    + left. destruct (Z_lt_le_dec y n) as [|Hle]; [assumption|]. rewrite (Hfr y Hle) in Ho. discriminate.
+  - intros y Hy. rewrite Hf.
+    + apply Hfr. lia.
+    + intro E. rewrite <- E in Hm. apply Hm. apply Hfr. lia.
+    + intro Hin. destruct (Hx y Hin) as (t & es & E). rewrite (Hfr y ltac:(lia)) in E. discriminate.
+    + right. exact Hy.
+Qed.
+
+Ltac hfr_arrays := let x := fresh "x" in let Hx := fresh "Hx" in
+  intros x Hx; cbn [In] in Hx; repeat (destruct Hx as [<-|Hx]; [do 2 eexists; eassumption|]); destruct Hx.
+
 Lemma key_at_same : forall h h' ks s, same_strings h h' -> key_at h' ks s = key_at h ks s.
 Proof.
   intros h h' ks s H. unfold key_at. destruct (nth_z ks s) as [[z|z|z|z| |kl|]|]; try reflexivity.
@@ -315,6 +347,7 @@ Theorem remove_map : forall h n sts ini lk m k ku A K thr,
                          ms_frames := [rm_frame m k] |}
     (Some (a_get h A ku))
     (fun s' => cim_rep (ms_heap s') m (a_remove h A ku) K thr /\ same_strings h (ms_heap s') /\
+               hframe h (ms_heap s') m n (ms_next s') /\
                ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
   intros h n sts ini lk m k ku A K thr Hrep Hk Hmax Hg He Hi.
@@ -355,7 +388,8 @@ Proof.
       pose proof (Lv_length ks (Z.to_nat u) 0). fold S in H. subst sz. change MAX_ARRAY with 1048576 in HKmax.
       change INT_MAX with 2147483647. clear -H Hu HKmax. lia. }
     intros s' (P1 & P2 & P3 & P4). rewrite P4.
-    split; [|split; [intros y u0; reflexivity | auto]].
+    assert (Hnx : ms_next s' = n) by auto.
+    split; [|split; [intros y u0; reflexivity | split; [rewrite Hnx; apply hframe_refl | auto]]].
     exists tA, kA, vA, cA, sz, u, af, tbl, ks, vs, cn, pw. repeat (split; [assumption|]). exact HA.
   - (* present in slot c = first_match *)
     set (c := first_match e h ks ku L) in *.
@@ -401,7 +435,10 @@ Proof.
       rewrite F_o by assumption. reflexivity. }
     assert (HndS' : length (remove Z.eq_dec c S) = (length S - 1)%nat) by (apply remove_length_in; assumption).
     assert (HLv : Lv (set_nth_z ks c VNull) 0 (Z.to_nat u) = remove Z.eq_dec c S) by (apply Lv_clear).
-    split; [|split; [exact Hsame | auto]].
+    assert (Hnx : ms_next s' = n) by auto.
+    split; [|split; [exact Hsame | split; [|auto]]].
+    2: { rewrite Hnx. apply (hframe_gen h H' m n n [tA; kA; vA; cA]); [lia | rewrite Hm; discriminate | hfr_arrays |].
+         intros y Y1 Y2 _. apply F_o; [exact Y1| | | |]; intro E; apply Y2; rewrite E; cbn [In]; tauto. }
     exists tA, kA, vA, cA, (sz - 1), u, af, tbl', (set_nth_z ks c VNull), (set_nth_z vs c VNull), cn', pw.
     refine (conj F_m (conj F_t (conj F_k (conj F_v (conj F_c (conj Htc (conj _ (conj Hpw _)))))))).
     + unfold tbl'. destruct (p =? -1); [rewrite set_nth_len|]; exact Hlen.
@@ -514,6 +551,7 @@ Theorem put_present_map : forall h n sts ini lk m k ku v A K thr,
                          ms_frames := [put_frame m k v] |}
     (Some (a_get h A ku))
     (fun s' => cim_rep (ms_heap s') m (a_set h A ku v) K thr /\ same_strings h (ms_heap s') /\
+               hframe h (ms_heap s') m n (ms_next s') /\
                ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
   intros h n sts ini lk m k ku v A K thr Hrep Hk Hmax Hg He Hi HK Hv Hmem.
@@ -540,15 +578,17 @@ Proof.
   rewrite (G2 c HcS Hhold), Hval.
   assert (Hvr : (match v with VNull | VRef _ => true | _ => false end) = true) by (destruct v; try contradiction; reflexivity).
   eapply returns_weaken.
-  { apply (put_present e h n sts ini lk m k v tA kA vA cA sz u thr af tbl ks vs cn pw ku i c old); try assumption.
-    - lia.
-    - exact (Hrefs c old Hold). }
+  { apply (put_present e h n sts ini lk m k v tA kA vA cA sz u thr af tbl ks vs cn pw ku i c old); try assumption; try lia.
+    exact (Hrefs c old Hold). }
   intros s' (P1 & P2 & P3 & P4). rewrite P1.
   assert (Hmv : m <> vA) by (intro E; subst; rewrite Hm in HvA; discriminate).
   assert (Htv : tA <> vA) by (intro E; subst; rewrite HtA in HvA; discriminate).
   assert (Hkv : kA <> vA) by (intro E; subst; rewrite HkA in HvA; discriminate).
   assert (Hcv : cA <> vA) by (intro E; subst; rewrite HcA in HvA; discriminate).
-  split; [|split; [apply (same_upd_obj h vA (OArr (TRef OBJ) vs)); [exact HvA | exact I | exact I] | auto]].
+  assert (Hnx : ms_next s' = n) by auto.
+  split; [|split; [apply (same_upd_obj h vA (OArr (TRef OBJ) vs)); [exact HvA | exact I | exact I] | split; [|auto]]].
+  2: { rewrite Hnx. apply (hframe_gen h _ m n n [vA]); [lia | rewrite Hm; discriminate | hfr_arrays |].
+       intros y Y1 Y2 _. apply upd_other. intro E; apply Y2; rewrite E; cbn [In]; tauto. }
   exists tA, kA, vA, cA, sz, u, af, tbl, ks, (set_nth_z vs c v), cn, pw.
   set (X := OArr (TRef OBJ) (set_nth_z vs c v)).
   assert (F1 : upd h vA X m = h m) by (apply upd_other; exact Hmv).

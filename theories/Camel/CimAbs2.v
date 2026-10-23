@@ -320,7 +320,7 @@ Theorem compact_ok : forall ks0 vs0 cn0 tbl pw u,
     0 <= n' <= u /\
     tbl_ok e h (fill_null ks' n' u) cn' tbl' pw (map Z.of_nat (seq 0 (length S))) /\
     (forall j p, nth_error S j = Some p ->
-       key_at h (fill_null ks' n' u) (Z.of_nat j) = key_at h ks0 p /\ nth_z (fill_null vs' n' u) (Z.of_nat j) = nth_z vs0 p) /\
+       nth_z (fill_null ks' n' u) (Z.of_nat j) = nth_z ks0 p /\ nth_z (fill_null vs' n' u) (Z.of_nat j) = nth_z vs0 p) /\
     (forall q, n' <= q < Z.of_nat (length ks0) -> nth_z (fill_null ks' n' u) q = Some VNull).
 Proof.
   intros ks0 vs0 cn0 tbl pw u Hlv Hlc Hu Hlt Hpw Hsl Hnull (Hkd & Ht) Hgood S n'.
@@ -424,8 +424,11 @@ Proof.
            destruct (nth_error S j) as [p|] eqn:Ep; [|apply nth_error_None in Ep; lia].
            rewrite (HKS j p Ep) in Hku. apply in_map_iff. exists p. split; [apply Hrk; exact Ep|].
            apply H4. split; [apply nth_error_In with j; exact Ep | exists ku; auto].
-  - intros j p Hj. split; [apply HKS; exact Hj|].
+  - intros j p Hj.
     assert (Hjlt : (j < length S)%nat) by (apply nth_error_Some; rewrite Hj; discriminate).
+    split.
+    { rewrite fill_null_lo by lia. rewrite <- (Hrk j p Hj).
+      destruct (Hmov p ltac:(apply nth_error_In with j; exact Hj)) as (M1 & _). exact M1. }
     rewrite fill_null_lo by lia. rewrite <- (Hrk j p Hj).
     destruct (Hmov p ltac:(apply nth_error_In with j; exact Hj)) as (_ & M2 & _). exact M2.
   - intros q Hq. destruct (Z_lt_le_dec q u) as [Hqu|Hqu].

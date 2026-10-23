@@ -57,7 +57,8 @@ Theorem put_compact : forall h n sts ini lk m k v tA kA vA cA sz u thr af tbl ks
                ms_heap s' vA = Some (OArr (TRef OBJ) (set_nth_z (fill_null vs' n' u) n' v)) /\
                ms_heap s' cA = Some (OArr TInt (set_nth_z cn' n' (VInt i0'))) /\
                ms_heap s' tA = Some (OArr TInt (set_nth_z tbl' b (VInt n'))) /\
-               (forall y, y < n -> y <> m -> y <> kA -> y <> vA -> y <> cA -> y <> tA -> ms_heap s' y = h y) /\
+               (forall y, y <> n -> y <> m -> y <> kA -> y <> vA -> y <> cA -> y <> tA -> ms_heap s' y = h y) /\
+               ms_heap s' n = Some (OArr TInt ni) /\
                ms_next s' = n + 1 /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
   intros h n sts ini lk m k v tA kA vA cA sz u thr af tbl ks vs cn pw ku i0 n' ni tbl' ks' vs' cn' i0'
@@ -129,9 +130,9 @@ Proof.
       - destruct v as [z|z|z|z| |vl|]; try exact I. destruct Hvd as (V1 & V2 & _). split; assumption.
       - reflexivity. }
     cbv zeta. intros s' (P1 & P2 & P3 & P4 & P5 & P6 & P7 & P8 & P9).
-    refine (conj P1 (conj P2 (conj P3 (conj P4 (conj P5 (conj _ (conj P7 (conj P8 P9)))))))).
-    intros y Hy Y1 Y2 Y3 Y4 Y5. rewrite P6 by assumption.
-    assert (Y6 : y <> n) by (clear -Hy; lia). apply H7; assumption.
+    refine (conj P1 (conj P2 (conj P3 (conj P4 (conj P5 (conj _ (conj _ (conj P7 (conj P8 P9))))))))).
+    + intros y Hy Y1 Y2 Y3 Y4 Y5. rewrite P6 by assumption. apply H7; assumption.
+    + rewrite P6 by (clear -Hnm Hnka Hnv Hnc Hnt; lia). exact H2.
 Qed.
 
 End Put3.

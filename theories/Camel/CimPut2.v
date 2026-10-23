@@ -175,7 +175,7 @@ Theorem put_grow : forall h n sts ini lk m k v tA kA vA cA sz u thr af tbl ks vs
                ms_heap s' (n + 1) = Some (OArr (TRef OBJ) (set_nth_z (grow (TRef OBJ) vs K') u v)) /\
                ms_heap s' (n + 2) = Some (OArr TInt (set_nth_z (grow TInt cn K') u (VInt i0))) /\
                ms_heap s' tA = Some (OArr TInt (set_nth_z tbl b (VInt u))) /\
-               (forall y, y < n -> y <> m -> y <> tA -> ms_heap s' y = h y) /\
+               (forall y, y <> n -> y <> n + 1 -> y <> n + 2 -> y <> m -> y <> tA -> ms_heap s' y = h y) /\
                ms_next s' = n + 3 /\ ms_statics s' = sts /\ ms_inited s' = ini).
 Proof.
   intros h n sts ini lk m k v tA kA vA cA sz u thr af tbl ks vs cn pw ku i0
@@ -272,7 +272,7 @@ Proof.
     - reflexivity. }
   cbv zeta. intros s' (P1 & P2 & P3 & P4 & P5 & P6 & P7 & P8 & P9).
   refine (conj P1 (conj P2 (conj P3 (conj P4 (conj P5 (conj _ (conj P7 (conj P8 P9)))))))).
-  intros y Hy Hym Hyt. rewrite P6 by lia. unfold h1. repeat rewrite upd_other by lia. reflexivity.
+  intros y Y0 Y1 Y2 Hym Hyt. rewrite P6 by (first [assumption | lia]). unfold h1. repeat rewrite upd_other by (first [assumption | lia]). reflexivity.
 Qed.
 
 End Put2.
