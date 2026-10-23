@@ -82,7 +82,7 @@ Definition cim_rep (h : heap) (m : Z) (A : list (Z * value)) (K : nat) : Prop :=
     h tA = Some (OArr TInt tbl) /\ h kA = Some (OArr (TRef STR) ks) /\
     h vA = Some (OArr (TRef OBJ) vs) /\ h cA = Some (OArr TInt cn) /\ tA <> cA /\
     Z.of_nat (length tbl) = 2 ^ pw /\ 0 <= pw <= 30 /\
-    length ks = K /\ length vs = K /\ length cn = K /\
+    length ks = K /\ length vs = K /\ length cn = K /\ Z.of_nat K <= MAX_ARRAY /\
     0 <= u <= Z.of_nat K /\ slots_ok ks 0 (Z.to_nat u) /\
     (forall q, u <= q < Z.of_nat K -> nth_z ks q = Some VNull) /\
     sz = Z.of_nat (length (Lv ks 0 (Z.to_nat u))) /\
@@ -101,7 +101,7 @@ Theorem get_map : forall h n sts ini lk m k ku A K,
 Proof.
   intros h n sts ini lk m k ku A K Hrep Hk Hmax Hg He Hi.
   destruct Hrep as (tA & kA & vA & cA & sz & u & thr & af & tbl & ks & vs & cn & pw &
-                    Hm & HtA & HkA & HvA & HcA & Htc & Hlen & Hpw & Hlk & Hlv & Hlc & Hu & Hsl & Hnull & Hsz & Htbl & Hkeys & Hrefs & HA).
+                    Hm & HtA & HkA & HvA & HcA & Htc & Hlen & Hpw & Hlk & Hlv & Hlc & HKmax & Hu & Hsl & Hnull & Hsz & Htbl & Hkeys & Hrefs & HA).
   set (S := Lv ks 0 (Z.to_nat u)) in *.
   destruct (find_correct e good eq_hash h ks cn tbl pw S ku Htbl Hkeys Hg ltac:(lia)) as (i & L & Hb & Hc & HlL & Hres).
   assert (Hkd : keyed h ks S) by (destruct Htbl; assumption).
@@ -263,6 +263,163 @@ Proof.
   - congruence.
   - intros u E. rewrite Hy in E. injection E as ->. exact Ho.
   - intros u ->. exact Ho'.
+Qed.
+
+
+Lemma remove_length_in : forall (l : list Z) x, NoDup l -> In x l -> length (remove Z.eq_dec x l) = (length l - 1)%nat.
+Proof.
+  induction l as [|y l IH]; intros x Hnd Hin; [destruct Hin|].
+  inversion Hnd as [|y' l' Hy Hnd']; subst. cbn [remove].
+  destruct (Z.eq_dec x y) as [->|Hne].
+  - rewrite notin_remove by exact Hy. cbn. lia.
+  - destruct Hin as [->|Hin]; [contradiction|]. cbn [length]. rewrite IH by assumption.
+    destruct l; [destruct Hin | cbn; lia].
+Qed.
+
+Lemma nth_set_nat_other : forall (l : list value) i j v d, 0 <= i -> 0 <= j -> i <> j ->
+  nth (Z.to_nat j) (set_nth_z l i v) d = nth (Z.to_nat j) l d.
+Proof.
+  induction l as [|x r IH]; intros i j v d Hi Hj Hij; cbn [set_nth_z]; [reflexivity|].
+  destruct (Z.eqb_spec i 0) as [->|Hne].
+  - destruct (Z.to_nat j) eqn:E; [lia | reflexivity].
+  - destruct (Z.to_nat j) eqn:E.
+    + reflexivity.
+    + cbn. replace n with (Z.to_nat (j - 1)) by lia. apply IH; lia.
+Qed.
+
+Lemma entries_set_other : forall ks vs c S v1 v2, 0 <= c -> (forall s, In s S -> 0 <= s /\ s <> c) ->
+  entries (set_nth_z ks c v1) (set_nth_z vs c v2) S = entries ks vs S.
+Proof.
+  intros ks vs c S v1 v2 Hc HS. induction S as [|s S IH]; [reflexivity|].
+  cbn [entries map]. destruct (HS s (or_introl eq_refl)) as (Hs & Hsc). f_equal.
+  - unfold key_ref. rewrite nth_set_other by congruence. f_equal. apply nth_set_nat_other; lia.
+  - apply IH. intros x Hx. apply HS. right. exact Hx.
+Qed.
+
+Lemma allrefs_set_null : forall vs c, allrefs vs -> allrefs (set_nth_z vs c VNull).
+Proof.
+  intros vs c H i v Hi. destruct (Z.eq_dec i c) as [->|Hne].
+  - destruct (Z_lt_le_dec c 0).
+    + exfalso. apply nth_z_bounds in Hi. lia.
+    + destruct (Nat.lt_ge_cases (Z.to_nat c) (length vs)).
+      * rewrite nth_set_same in Hi by lia. injection Hi as <-. reflexivity.
+      * apply nth_z_bounds in Hi. rewrite set_nth_len in Hi. lia.
+  - rewrite nth_set_other in Hi by congruence. apply (H i v Hi).
+Qed.
+
+Theorem remove_map : forall h n sts ini lk m k ku A K,
+  cim_rep h m A K ->
+  h k = Some (OStr ku) -> slen ku <= INT_MAX -> good ku ->
+  erroneous cp 64 sts CIM = false -> init_needed cp 64 ini CIM = None ->
+  returns cp (mdl e) {| ms_heap := h; ms_next := n; ms_statics := sts; ms_inited := ini; ms_locks := lk;
+                         ms_frames := [rm_frame m k] |}
+    (Some (a_get h A ku))
+    (fun s' => cim_rep (ms_heap s') m (a_remove h A ku) K /\ same_strings h (ms_heap s') /\
+               ms_next s' = n /\ ms_statics s' = sts /\ ms_inited s' = ini).
+Proof.
+  intros h n sts ini lk m k ku A K Hrep Hk Hmax Hg He Hi.
+  destruct Hrep as (tA & kA & vA & cA & sz & u & thr & af & tbl & ks & vs & cn & pw &
+                    Hm & HtA & HkA & HvA & HcA & Htc & Hlen & Hpw & Hlk & Hlv & Hlc & HKmax & Hu & Hsl & Hnull & Hsz & Htbl & Hkeys & Hrefs & HA).
+  set (S := Lv ks 0 (Z.to_nat u)) in *.
+  assert (HndS : NoDup S) by apply Lv_NoDup.
+  destruct (find_correct e good eq_hash h ks cn tbl pw S ku Htbl Hkeys Hg ltac:(lia)) as (i & L & Hb & Hc & HlL & Hres).
+  pose proof Htbl as (Hkd & Ht).
+  assert (Hbb : 0 <= bucket e ku pw < 2 ^ pw) by (unfold bucket; apply Z.mod_pos_bound; apply Z.pow_pos_nonneg; lia).
+  destruct (Ht _ Hbb) as (i' & L' & Hb' & Hc' & Hnd' & Hm').
+  rewrite Hb in Hb'. injection Hb' as <-. assert (HL : L = L') by (eapply chain_unique; eassumption). subst L'.
+  assert (HkL : keyed h ks L) by (intros s Hs; apply Hkd; apply Hm' in Hs; tauto).
+  assert (Hw : rm_walk e h ks cn ku (-1) i (Datatypes.S (length ks)) = Some (rm_match e h ks ku (-1) L))
+    by (apply rm_walk_chain; [exact Hc | exact HkL | lia]).
+  destruct (a_get_entries h ks vs S ku Hkeys Hkd Hg S (fun s Hs => Hs)) as (G1 & G2).
+  destruct (a_remove_entries h ks vs S ku Hkeys Hkd Hg S (fun s Hs => Hs) HndS) as (R1 & R2).
+  assert (Hmt : m <> tA) by (intro E; subst; rewrite Hm in HtA; discriminate).
+  assert (Hmk : m <> kA) by (intro E; subst; rewrite Hm in HkA; discriminate).
+  assert (Hmv : m <> vA) by (intro E; subst; rewrite Hm in HvA; discriminate).
+  assert (Hmc : m <> cA) by (intro E; subst; rewrite Hm in HcA; discriminate).
+  assert (Hkt : kA <> tA) by (intro E; subst; rewrite HkA in HtA; discriminate).
+  assert (Hkv : kA <> vA) by (intro E; subst; rewrite HkA in HvA; discriminate).
+  assert (Hkc : kA <> cA) by (intro E; subst; rewrite HkA in HcA; discriminate).
+  assert (Hvt : vA <> tA) by (intro E; subst; rewrite HvA in HtA; discriminate).
+  assert (Hvc : vA <> cA) by (intro E; subst; rewrite HvA in HcA; discriminate).
+  destruct (rm_match_first h ks ku L (-1) HkL) as [(Hn1 & Hf1) | (p & Hp)].
+  - (* not present *)
+    rewrite Hn1 in Hw.
+    assert (Hno : forall s, ~ holds e h ks S ku s).
+    { destruct Hres as [(_ & H2) | H1]; [exact H2|]. rewrite Hf1 in H1. destruct H1 as (HS & _). apply Lv_range in HS. lia. }
+    assert (Ev : a_get h A ku = VNull) by (subst A; apply G1; intros s _; apply Hno).
+    assert (Er : a_remove h A ku = A) by (subst A; apply R1; intros s _; apply Hno).
+    rewrite Ev, Er.
+    eapply returns_weaken.
+    { apply (remove_spec e h n sts ini lk m k ku tA kA vA cA sz u thr af tbl ks vs cn pw i None);
+        try assumption; try lia.
+      pose proof (Lv_length ks (Z.to_nat u) 0). fold S in H. subst sz. change MAX_ARRAY with 1048576 in HKmax.
+      change INT_MAX with 2147483647. clear -H Hu HKmax. lia. }
+    intros s' (P1 & P2 & P3 & P4). rewrite P4.
+    split; [|split; [intros y u0; reflexivity | auto]].
+    exists tA, kA, vA, cA, sz, u, thr, af, tbl, ks, vs, cn, pw. repeat (split; [assumption|]). exact HA.
+  - (* present in slot c = first_match *)
+    set (c := first_match e h ks ku L) in *.
+    rewrite Hp in Hw.
+    destruct (rm_match_found e h ks ku L (-1) p c Hp) as (HcL & uc & Huc & Euc).
+    assert (HcS : In c S) by (apply Hm' in HcL; tauto).
+    assert (Hhold : holds e h ks S ku c) by (split; [exact HcS | exists uc; auto]).
+    assert (Hcr : 0 <= c < u) by (apply Lv_range in HcS; lia).
+    destruct (chain_next cn i L c Hc HcL) as (j & Hj & _).
+    destruct (remove_ok e good h ks cn tbl pw S ku i p c j Htbl Hkeys Hg ltac:(lia) ltac:(lia) Hb Hw Hj)
+      as (_ & Htbl' & Hkeys').
+    assert (Ev : a_get h A ku = nth (Z.to_nat c) vs VNull) by (subst A; apply G2; assumption).
+    assert (Er : a_remove h A ku = entries ks vs (remove Z.eq_dec c S)) by (subst A; apply R2; assumption).
+    rewrite Ev, Er.
+    eapply returns_weaken.
+    { apply (remove_spec e h n sts ini lk m k ku tA kA vA cA sz u thr af tbl ks vs cn pw i (Some (p, c)));
+        try assumption; try lia.
+      pose proof (Lv_length ks (Z.to_nat u) 0). fold S in H. subst sz. change MAX_ARRAY with 1048576 in HKmax.
+      change INT_MAX with 2147483647. clear -H Hu HKmax. lia. }
+    intros s' (P1 & P2 & P3 & (j' & Hj' & P4)). rewrite Hj in Hj'. injection Hj' as <-.
+    rewrite P4.
+    set (b := cih_spec e ku mod 2 ^ pw) in *.
+    set (H' := rm_heap h m tA kA vA cA sz u thr af tbl ks vs cn b p c j).
+    set (tbl' := if p =? -1 then set_nth_z tbl b (VInt j) else tbl) in *.
+    set (cn' := if p =? -1 then cn else set_nth_z cn p (VInt j)) in *.
+    assert (F_m : H' m = Some (OObj CIM (cim_fields tA kA vA cA (sz - 1) u thr af))) by (unfold H', rm_heap; apply upd_same).
+    assert (F_v : H' vA = Some (OArr (TRef OBJ) (set_nth_z vs c VNull)))
+      by (unfold H', rm_heap; rewrite upd_other by congruence; apply upd_same).
+    assert (F_k : H' kA = Some (OArr (TRef STR) (set_nth_z ks c VNull)))
+      by (unfold H', rm_heap; rewrite !upd_other by congruence; apply upd_same).
+    assert (F_t : H' tA = Some (OArr TInt tbl')).
+    { unfold H', rm_heap, tbl'. rewrite !upd_other by congruence. destruct (p =? -1); [apply upd_same | rewrite upd_other by congruence; exact HtA]. }
+    assert (F_c : H' cA = Some (OArr TInt cn')).
+    { unfold H', rm_heap, cn'. rewrite !upd_other by congruence. destruct (p =? -1); [rewrite upd_other by congruence; exact HcA | apply upd_same]. }
+    assert (F_o : forall y, y <> m -> y <> tA -> y <> kA -> y <> vA -> y <> cA -> H' y = h y).
+    { intros y Y1 Y2 Y3 Y4 Y5. unfold H', rm_heap. rewrite !upd_other by congruence. destruct (p =? -1); apply upd_other; congruence. }
+    assert (Hsame : same_strings h H').
+    { intros y u0. destruct (Z.eq_dec y m) as [->|N1]; [rewrite F_m, Hm; split; discriminate|].
+      destruct (Z.eq_dec y tA) as [->|N2]; [rewrite F_t, HtA; split; discriminate|].
+      destruct (Z.eq_dec y kA) as [->|N3]; [rewrite F_k, HkA; split; discriminate|].
+      destruct (Z.eq_dec y vA) as [->|N4]; [rewrite F_v, HvA; split; discriminate|].
+      destruct (Z.eq_dec y cA) as [->|N5]; [rewrite F_c, HcA; split; discriminate|].
+      rewrite F_o by assumption. reflexivity. }
+    assert (HndS' : length (remove Z.eq_dec c S) = (length S - 1)%nat) by (apply remove_length_in; assumption).
+    assert (HLv : Lv (set_nth_z ks c VNull) 0 (Z.to_nat u) = remove Z.eq_dec c S) by (apply Lv_clear).
+    split; [|split; [exact Hsame | auto]].
+    exists tA, kA, vA, cA, (sz - 1), u, thr, af, tbl', (set_nth_z ks c VNull), (set_nth_z vs c VNull), cn', pw.
+    refine (conj F_m (conj F_t (conj F_k (conj F_v (conj F_c (conj Htc (conj _ (conj Hpw _)))))))).
+    + unfold tbl'. destruct (p =? -1); [rewrite set_nth_len|]; exact Hlen.
+    + rewrite !set_nth_len. split; [exact Hlk|]. split; [exact Hlv|]. split.
+      { unfold cn'. destruct (p =? -1); [|rewrite set_nth_len]; exact Hlc. }
+      split; [exact HKmax|]. split; [exact Hu|]. split.
+      { intros q Hq. destruct (Z.eq_dec q c) as [->|Hne].
+        - left. apply nth_set_same. rewrite Hlk. lia.
+        - rewrite nth_set_other by congruence. apply Hsl. exact Hq. }
+      split.
+      { intros q Hq. rewrite nth_set_other by lia. apply Hnull. rewrite <- Hlk in Hq |- *. lia. }
+      rewrite HLv. split.
+      { rewrite HndS'. subst sz. assert (length S > 0)%nat by (destruct S; [destruct HcS | cbn; lia]). lia. }
+      split; [apply (tbl_ok_same h H'); assumption|].
+      split; [apply (keys_ok_same h H'); assumption|].
+      split; [apply allrefs_set_null; exact Hrefs|].
+      symmetry. apply entries_set_other; [lia|].
+      intros s0 Hs0. apply in_rm_iff in Hs0 as (Hs0 & Hne). apply Lv_range in Hs0. split; [lia | exact Hne].
 Qed.
 
 End Map.
