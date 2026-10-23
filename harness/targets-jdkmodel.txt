@@ -13,3 +13,4 @@ classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CollOps collections
 classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.Sizing sizing (II)I
 classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps tieBreak (I)I
 classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps strings (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ViewOps views (I)I

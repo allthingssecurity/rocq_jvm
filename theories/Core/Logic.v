@@ -8,6 +8,7 @@
 
 From Stdlib Require Import ZArith String List Bool Lia.
 From JVM.Core Require Import Int Instr Desc Semantics Machine.
+From JVM.Loader Require Import ClassFile.
 Import ListNotations.
 Open Scope string_scope.
 
@@ -159,3 +160,261 @@ Proof.
   destruct Hk as [-> | ->]; rewrite Hr, Hu, Hm; unfold invoke_run_model; rewrite Hm;
   unfold invoke_frame_go; subst st'; rewrite Hb; reflexivity.
 Qed.
+
+(** ** Step lemmas for heap instructions and calls into bytecode *)
+Section HeapSteps.
+Variable p : program.
+Variable mdl : model.
+
+Lemma mstep_getfield : forall s top rest fr nx l r c fs v,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Getfield fr, nx) ->
+  f_stack (cf_frame top) = VRef l :: r ->
+  ms_heap s l = Some (OObj c fs) ->
+  assoc (fr_name fr) fs = Some v ->
+  (stack_slots (v :: r) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (v :: r) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest fr nx l r c fs v Hfr Hf Hst Hh Ha Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+
+Lemma mstep_putfield : forall s top rest fr nx v l r c fs t fs',
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Putfield fr, nx) ->
+  f_stack (cf_frame top) = v :: VRef l :: r ->
+  field_type (fr_desc fr) = Some t ->
+  value_fits t v = true ->
+  ms_heap s l = Some (OObj c fs) ->
+  set_assoc (fr_name fr) (narrow_store t v) fs = Some fs' ->
+  (stack_slots r <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames {| ms_heap := upd (ms_heap s) l (OObj c fs'); ms_next := ms_next s;
+                          ms_statics := ms_statics s; ms_inited := ms_inited s; ms_locks := ms_locks s;
+                          ms_frames := ms_frames s |}
+             (set_frame top (mkframe nx r (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest fr nx v l r c fs t fs' Hfr Hf Hst Ht Hv Hh Ha Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Ht.
+  destruct v; cbn [value_fits] in Hv; try discriminate Hv; cbn [negb];
+  rewrite ?Hv; cbn [negb]; rewrite Hh, Ha; cbv beta iota zeta; cbn [f_stack f_pc f_locals]; rewrite Hb; reflexivity.
+Qed.
+
+Lemma mstep_getstatic : forall s top rest fr nx v,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Getstatic fr, nx) ->
+  erroneous p 64 (ms_statics s) (fr_class fr) = false ->
+  init_needed p 64 (ms_inited s) (fr_class fr) = None ->
+  assoc (static_key (fr_class fr) (fr_name fr)) (ms_statics s) = Some v ->
+  (stack_slots (v :: f_stack (cf_frame top)) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s = MNext (with_frames s (set_frame top
+                         (mkframe nx (v :: f_stack (cf_frame top)) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest fr nx v Hfr Hf He Hi Ha Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite He, Hi, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+
+Lemma mstep_aaload : forall s top rest nx i l r e es v,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (ALoadArr AA, nx) ->
+  f_stack (cf_frame top) = VInt i :: VRef l :: r ->
+  ms_heap s l = Some (OArr e es) ->
+  akind_load_ok AA e = true ->
+  ((i <? 0) || (Z.of_nat (length es) <=? i))%Z = false ->
+  nth_z es i = Some v ->
+  (stack_slots (v :: r) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (v :: r) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest nx i l r e es v Hfr Hf Hst Hh Hk Hr Hn Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk. cbn [negb]. rewrite Hr, Hn. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb.
+  reflexivity.
+Qed.
+
+Lemma mstep_aastore_ref : forall s top rest nx vl i l r e es o cname,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (AStoreArr AA, nx) ->
+  f_stack (cf_frame top) = VRef vl :: VInt i :: VRef l :: r ->
+  ms_heap s l = Some (OArr e es) ->
+  akind_ok AA e (VRef vl) = true ->
+  ((i <? 0) || (Z.of_nat (length es) <=? i))%Z = false ->
+  ms_heap s vl = Some o ->
+  (match e with TArr _ => type_desc e | TRef c => c | _ => "" end) = cname ->
+  assignable p 64 (runtime_type o) cname = Some true ->
+  (stack_slots r <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames {| ms_heap := upd (ms_heap s) l (OArr e (set_nth_z es i (narrow_store e (VRef vl))));
+                          ms_next := ms_next s; ms_statics := ms_statics s; ms_inited := ms_inited s;
+                          ms_locks := ms_locks s; ms_frames := ms_frames s |}
+             (set_frame top (mkframe nx r (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest nx vl i l r e es o cname Hfr Hf Hst Hh Hk Hr Ho Hc Ha Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk. cbn [negb]. rewrite Hr, Ho.
+  rewrite Hc, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+
+Lemma mstep_new : forall s top rest cn nx fs,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (New cn, nx) ->
+  erroneous p 64 (ms_statics s) cn = false ->
+  init_needed p 64 (ms_inited s) cn = None ->
+  instance_fields p 64 cn = Some fs ->
+  (stack_slots (VRef (ms_next s) :: f_stack (cf_frame top)) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames (snd (alloc s (OObj cn fs)))
+             (set_frame top (mkframe nx (VRef (ms_next s) :: f_stack (cf_frame top)) (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest cn nx fs Hfr Hf He Hi Hfs Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite He, Hi, Hfs. cbn [alloc fst snd].
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+
+(** Calls into loaded bytecode: [enter] pushes the callee frame. *)
+Lemma do_invoke_static_enter : forall s top rest mr args r nx cn m,
+  erroneous p 64 (ms_statics s) (mr_class mr) = false ->
+  init_needed p 64 (ms_inited s) (mr_class mr) = None ->
+  resolve_full p (mr_class mr) (mr_name mr) (mr_desc mr) = Some (cn, m) ->
+  Z.testbit (m_access m) 8 = false ->
+  do_invoke 8 p mdl s top rest InvStatic mr args r nx =
+    enter s (set_frame top (mkframe (f_pc (cf_frame top)) r (f_locals (cf_frame top)))) rest cn m args nx.
+Proof.
+  intros s top rest mr args r nx cn m He Hi Hr Hn. unfold do_invoke. rewrite He, Hi, Hr, Hn. reflexivity.
+Qed.
+
+Lemma do_invoke_obj_enter : forall s top rest k mr l more r nx cls fs cn m,
+  (k = InvVirtual \/ k = InvInterface) ->
+  ms_heap s l = Some (OObj cls fs) ->
+  resolve_full p cls (mr_name mr) (mr_desc mr) = Some (cn, m) ->
+  Z.testbit (m_access m) 8 = false ->
+  do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
+    enter s (set_frame top (mkframe (f_pc (cf_frame top)) r (f_locals (cf_frame top)))) rest cn m (VRef l :: more) nx.
+Proof.
+  intros s top rest k mr l more r nx cls fs cn m Hk Hh Hr Hn.
+  assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
+              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+                         p mdl s top rest k mr l more (ms_heap s l) r nx)
+    by (destruct Hk as [-> | ->]; reflexivity).
+  rewrite E, Hh. unfold invoke_obj. destruct Hk as [-> | ->]; rewrite Hr, Hn; reflexivity.
+Qed.
+
+Lemma do_invoke_special_enter : forall s top rest mr l more r nx o cn m,
+  ms_heap s l = Some o ->
+  (match o with OLam _ _ _ _ _ => false | _ => true end) = true ->
+  resolve_full p (mr_class mr) (mr_name mr) (mr_desc mr) = Some (cn, m) ->
+  Z.testbit (m_access m) 8 = false ->
+  do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
+    enter s (set_frame top (mkframe (f_pc (cf_frame top)) r (f_locals (cf_frame top)))) rest cn m (VRef l :: more) nx.
+Proof.
+  intros s top rest mr l more r nx o cn m Hh Ho Hr Hn.
+  assert (E : do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
+              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+                         p mdl s top rest InvSpecial mr l more (ms_heap s l) r nx) by reflexivity.
+  rewrite E, Hh. unfold invoke_obj. destruct o; try discriminate Ho; rewrite Hr, Hn; reflexivity.
+Qed.
+
+(** Return from a callee to its caller. *)
+Lemma mstep_return_to : forall s top caller rest i nx v nx',
+  ms_frames s = top :: caller :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (i, nx) ->
+  is_local_instr i = true ->
+  cf_clinit top = false ->
+  step (cf_code top) (cf_rt top) (cf_frame top) = Done v ->
+  cf_resume caller = Some nx' ->
+  mstep_of p mdl s =
+    MNext (with_frames s (set_resume (set_frame caller
+             (mkframe nx' (match v with Some w => w :: f_stack (cf_frame caller) | None => f_stack (cf_frame caller) end)
+                      (f_locals (cf_frame caller)))) None :: rest)).
+Proof.
+  intros s top caller rest i nx v nx' Hfr Hf Hl Hc Hs Hr.
+  unfold mstep_of. rewrite Hfr, Hf, Hl, Hs, Hc. unfold return_to. rewrite Hr. reflexivity.
+Qed.
+End HeapSteps.
+
+Section MoreSteps.
+Variable p : program.
+Variable mdl : model.
+
+Lemma init_needed_done : forall k inited c cf,
+  find_class p c = Some cf -> existsb (String.eqb c) inited = true -> init_needed p (S k) inited c = None.
+Proof. intros k inited c cf Hf He. simpl. rewrite Hf, He. reflexivity. Qed.
+
+Lemma mstep_ldc_string : forall s top rest raw nx u,
+  ms_frames s = top :: rest ->
+  fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Ldc (LdcString raw), nx) ->
+  utf8_units raw = Some u ->
+  (stack_slots (VRef (fst (intern s (OStr u))) :: f_stack (cf_frame top)) <=? c_max_stack (cf_code top))%Z = true ->
+  mstep_of p mdl s =
+    MNext (with_frames (snd (intern s (OStr u)))
+             (set_frame top (mkframe nx (VRef (fst (intern s (OStr u))) :: f_stack (cf_frame top))
+                                     (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest raw nx u Hfr Hf Hu Hb.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hu.
+  destruct (intern s (OStr u)) as [l s'] eqn:Ei. cbn [fst snd] in *.
+  cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+Qed.
+
+(** Interning only allocates a fresh object: old objects, frames and initialisation state are unchanged. *)
+Lemma intern_old : forall s o x, x < ms_next s -> ms_heap (snd (intern s o)) x = ms_heap s x.
+Proof.
+  intros s o x Hx. unfold intern. destruct (assoc (intern_key o) (ms_statics s)) as [[]|]; simpl; try reflexivity.
+  all: unfold upd; destruct (Z.eqb_spec x (ms_next s)); [lia | reflexivity].
+Qed.
+
+Lemma intern_next : forall s o, ms_next s <= ms_next (snd (intern s o)).
+Proof.
+  intros s o. unfold intern. destruct (assoc (intern_key o) (ms_statics s)) as [[]|]; simpl; lia.
+Qed.
+
+Lemma intern_frames : forall s o, ms_frames (snd (intern s o)) = ms_frames s.
+Proof. intros. unfold intern. destruct (assoc (intern_key o) (ms_statics s)) as [[]|]; reflexivity. Qed.
+
+Lemma intern_inited : forall s o, ms_inited (snd (intern s o)) = ms_inited s.
+Proof. intros. unfold intern. destruct (assoc (intern_key o) (ms_statics s)) as [[]|]; reflexivity. Qed.
+
+Lemma intern_statics : forall s o k, k <> intern_key o ->
+  assoc k (ms_statics (snd (intern s o))) = assoc k (ms_statics s).
+Proof.
+  intros s o k Hk. unfold intern. destruct (assoc (intern_key o) (ms_statics s)) as [[]|]; simpl; try reflexivity.
+  all: destruct (String.eqb_spec k (intern_key o)); [contradiction | reflexivity].
+Qed.
+
+(** A virtual/interface call on an object of a class that is not loaded, answered by a model. *)
+Lemma do_invoke_unloaded_model : forall s top rest k mr l more r nx cls fs v s',
+  (k = InvVirtual \/ k = InvInterface) ->
+  ms_heap s l = Some (OObj cls fs) ->
+  resolve_full p cls (mr_name mr) (mr_desc mr) = None ->
+  first_unloaded p 64 cls = cls ->
+  mdl cls (mr_name mr) (mr_desc mr) (VRef l :: more) s = MOk v s' ->
+  let st' := match v with Some w => w :: r | None => r end in
+  (stack_slots st' <=? c_max_stack (cf_code top))%Z = true ->
+  do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
+    MNext (with_frames (with_frames s' (ms_frames s))
+             (set_frame top (mkframe nx st' (f_locals (cf_frame top))) :: rest)).
+Proof.
+  intros s top rest k mr l more r nx cls fs v s' Hk Hh Hr Hu Hm st' Hb.
+  assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
+              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+                         p mdl s top rest k mr l more (ms_heap s l) r nx)
+    by (destruct Hk as [-> | ->]; reflexivity).
+  rewrite E, Hh. unfold invoke_obj.
+  destruct Hk as [-> | ->]; rewrite Hr, Hu, Hm; unfold invoke_run_model; rewrite Hm;
+  unfold invoke_frame_go; subst st'; rewrite Hb; reflexivity.
+Qed.
+End MoreSteps.
+
+Section InternFacts.
+Variable p : program.
+
+Lemma err_key_ne : forall c u, ("#err:" ++ c)%string <> intern_key (OStr u).
+Proof. intros c u H. cbn in H. discriminate H. Qed.
+
+Lemma erroneous_intern : forall k s u c,
+  erroneous p k (ms_statics (snd (intern s (OStr u)))) c = erroneous p k (ms_statics s) c.
+Proof.
+  induction k as [|k IH]; intros s u c; [reflexivity|]. cbn [erroneous].
+  destruct (find_class p c) as [cf|]; [|reflexivity].
+  rewrite intern_statics by apply err_key_ne.
+  destruct (assoc ("#err:" ++ c) (ms_statics s)); [reflexivity|].
+  destruct (cf_super cf); [apply IH | reflexivity].
+Qed.
+End InternFacts.
