@@ -87,7 +87,9 @@ Unbounded, on the real bytecode of the fix, for **any heap** (no bound on sizes 
 | `CimCompact.call_compact`, `CimPut3.put_compact` | no free slot and at most half hold keys (**the fix**): compactRemovedSlots — its three loops proved equal to Rocq functions `c1`/`c2`/`c3` — then insert, **without growing the arrays** |
 | `CimRemove.remove_spec`, `get_spec`, `containsKey_spec` | remove (unlink from the chain, clear the slot) / get / containsKey |
 | `CimAbs.find_correct`, `insert_ok`, `insert_keys_ok`, `remove_ok` | the table invariant (every bucket's chain lists exactly the used slots of that bucket, keys pairwise different ignoring case): findIndex finds the slot of the key or -1; insertion and removal preserve the invariant (for keys on which equalsIgnoreCase is an equivalence consistent with the hash — e.g. strings without surrogates, see `CimSpec`) |
-Still open for the whole-class theorem: the effect of `c1`/`c2`/`c3` on the invariant (compaction keeps the map and the order), `resize` (needs (int)(n*0.75f) on the float model), and the composition over every operation sequence (as `WalRing.session_ok`).
+| `CimAbs2.c1_ok`, `c2_ok`, `c3_ok`, **`compact_ok`** | **compaction (the fix) keeps the table invariant, every entry and their order**, renumbers the used slots 0..size-1 and frees the rest; its three loops never fail on a valid table |
+| **`CimMap.get_map`, `remove_map`, `put_present_map`** | **the real bytecode of get / remove / put-of-a-present-key, on any heap holding a map in the invariant (`cim_rep`), returns exactly what the abstract insertion-ordered case-insensitive map returns, and leaves a map in the invariant whose entries are the abstract result** |
+Still open for the whole-class theorem: composing put of a *new* key (fast / grow / compact paths are each proved on the bytecode and on the invariant, the glue to `cim_rep` is not written yet), `resize` (needs (int)(n*0.75f) on the float model), and the induction over every operation sequence (as `WalRing.session_ok`).
 
 ## Proof infrastructure
 - `Core/Tactics.v`: symbolic execution of the frame interpreter (`symex`), used for int-only methods.
@@ -99,7 +101,7 @@ Still open for the whole-class theorem: the effect of `c1`/`c2`/`c3` on the inva
   exhausts memory). `CimHash.v` shows the pattern: precomputed facts about the loaded program by `vm_compute`,
   model calls as lemmas proved with `cbv`, one tactic per instruction kind, loop proofs by induction.
 
-## Model bugs found tonight (being fixed on branch `model-gaps`, not merged yet)
+## Model bugs found tonight (fixed on branch `model-gaps` in /home/claude/rocq-jvm-gaps, commit b6f22ca, not merged yet)
 - Instance fields are keyed by name only: a subclass field shadowing a superclass field of the same name collides
   (CaseInsensitiveMap.values vs AbstractMap.values). Not reached by any proof or test so far.
 - invokevirtual of a private method selects from the receiver's runtime class (JVMS 5.4.6: the resolved private method
