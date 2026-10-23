@@ -619,8 +619,8 @@ Definition enum_model (name desc : string) (args : list value) (s : mstate) : mo
       if String.eqb name "<init>" && String.eqb desc "(Ljava/lang/String;I)V" then
         match rest with
         | [n; VInt o] =>
-            match set_assoc "name" n fs with
-            | Some fs1 => match set_assoc "ordinal" (VInt o) fs1 with
+            match set_assoc (own_key "java/lang/Enum" "name" fs) n fs with
+            | Some fs1 => match set_assoc (own_key "java/lang/Enum" "ordinal" fs) (VInt o) fs1 with
                           | Some fs2 => MOk None (set_heap s l (OObj c fs2))
                           | None => MStuckModel "enum fields"
                           end
@@ -629,9 +629,9 @@ Definition enum_model (name desc : string) (args : list value) (s : mstate) : mo
         | _ => MStuckModel "Enum.<init>"
         end
       else if String.eqb name "ordinal" && String.eqb desc "()I" then
-        match assoc "ordinal" fs with Some v => MOk (Some v) s | None => MStuckModel "ordinal" end
+        match assoc (own_key "java/lang/Enum" "ordinal" fs) fs with Some v => MOk (Some v) s | None => MStuckModel "ordinal" end
       else if (String.eqb name "name" || String.eqb name "toString") && String.eqb desc "()Ljava/lang/String;" then
-        match assoc "name" fs with Some v => MOk (Some v) s | None => MStuckModel "name" end
+        match assoc (own_key "java/lang/Enum" "name" fs) fs with Some v => MOk (Some v) s | None => MStuckModel "name" end
       else if String.eqb name "equals" && String.eqb desc "(Ljava/lang/Object;)Z" then
         match rest with [v] => ret_bool s (ref_eq (VRef l) v) | _ => MStuckModel "equals" end
       else MNoModel

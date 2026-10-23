@@ -27,13 +27,14 @@ PARTIAL = {'ldc': 'int/float/String/Class constants; MethodType/MethodHandle/dyn
            'ldc_w': 'as ldc', 'ldc2_w': 'long/double constants (dynamic constants not yet)',
            'invokedynamic': 'javac string concatenation (StringConcatFactory) and lambdas/method refs (LambdaMetafactory.metafactory, except Foo::new); altMetafactory, records, switch patterns not yet',
            'invokevirtual': 'loaded classes + JDK methods that have a model (TRUST.md)',
-           'invokeinterface': 'as invokevirtual; default methods; lambda objects',
+           'invokeinterface': 'as invokevirtual; maximally-specific default methods, private interface methods (JVMS 5.4.6); lambda objects',
            'invokestatic': 'as invokevirtual', 'invokespecial': 'as invokevirtual',
            'monitorenter': 'single thread: entry counts only (threads: Track C)', 'monitorexit': 'as monitorenter',
-           'getstatic': 'loaded classes; JDK static fields with a model (Boolean.TRUE/FALSE)'}
+           'getstatic': 'field resolution through superclasses and superinterfaces (JVMS 5.4.3.2), initialises the declaring class; JDK static fields with a model (Boolean.TRUE/FALSE)'}
 SEM |= set(PARTIAL)
 targets = set()
-for t in ('harness/targets-phase1.txt', 'harness/targets-stackops.txt', 'harness/targets-ops2.txt', 'harness/targets-heap.txt', 'harness/targets-strs.txt', 'harness/targets-flt.txt', 'harness/targets-lam.txt'):
+for t in ('harness/targets-phase1.txt', 'harness/targets-stackops.txt', 'harness/targets-ops2.txt', 'harness/targets-heap.txt', 'harness/targets-strs.txt', 'harness/targets-flt.txt', 'harness/targets-lam.txt',
+          'harness/targets-fld.txt', 'harness/targets-sel.txt'):
     for line in open(t):
         if line.strip():
             d, c, m, desc = line.split()[:4]

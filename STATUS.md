@@ -41,6 +41,8 @@ a user object in string concatenation), identity hash codes.
 | `Strs` (String/StringBuilder/Character/parse/concat/switch/enum) | 53 | 10,000 (in progress; 200 earlier: 0 after 2 model fixes) | 0 |
 | `Flt` (float/double opcodes) | 31 | 10,000 (in progress; 2,000 earlier: 0) | 0 |
 | `Lam` (lambdas, method refs, boxing caches, multianewarray, EIIE/NCDFE, enum switch) | 15 | 10,000 (in progress; 300 earlier: 0) | 0 |
+| `Fld` (corpus6: inherited/shadowed static and instance fields, interface fields, init order incl. superinterfaces with defaults, circular and erroneous initialisation, inherited static methods, enum with `name`/`ordinal` fields) | 11 | 2,000 | 0 |
+| `Sel` (corpus7: private methods incl. nestmates and private interface methods, maximally-specific defaults, package-private overriding across packages incl. JVMS 5.4.5 (b), super calls; classes recompiled separately: ICCE / AME / NoSuchMethodError / NoSuchFieldError, resolution before the null check) | 8 | 2,000 | 0 (172 of 2,000 inputs of `changed`/`changedCaught` are `STUCK` by design: the JVMS/HotSpot divergence below) |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
 | camel-wal whole class (`WalScenario`: TransactionLog + LayerInfo + EntryContainer + LogEntry + EntryState) main + fix | 2 | 4,516 scenarios | 0 |
@@ -78,8 +80,39 @@ the superclass chain). Canaries (`harness/canary.sh`, the float canaries) confir
 | `CimScenario.main_runs` / `fix_runs` | 40 random runs of 100 operations (4 keys × 2 case variants incl. `x-é`/`X-É`): both versions answer every put/remove/get/containsKey/size exactly like a map; main holds up to 28 slots, the fix 13 (kernel-computed, with Track B's `AbstractMap` model class) |
 Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-insensitive map, slot count ≤ max(13, 2·size + c)) by the symbolic method used for camel-wal.
 
+## Field and method resolution, selection, class initialisation (JVMS 5.4.3, 5.4.5, 5.4.6, 5.5)
+- **Fields** (`Machine.resolve_field`, 5.4.3.2): the referenced class, its superinterfaces, then its superclass, over
+  loaded classes and the generated JDK table `Core/JdkTables.v` (declared members of Object, Enum, Record, Throwable
+  and the exception classes, Number, the java.lang marker/functional interfaces, java.util.function; regenerate with
+  `tools/gen_jdk_tables.sh`). getstatic/putstatic initialise the class that *declares* the field (an inherited static
+  field no longer initialises the referenced class, an erroneous subclass does not hide its superclass's fields).
+  NoSuchFieldError / IncompatibleClassChangeError (static vs instance) are thrown, also before the null check of getfield/putfield.
+- **Shadowed instance fields**: an object stores its fields most-derived first; a field shadowed by a subclass field of
+  the same name is keyed `"<DeclaringClass>.<name>"`, every other field keeps its plain name (`instance_fields`).
+  getfield/putfield resolve the field only when the object holds a shadowed field of that name (`field_slot`), so the
+  keys and lookups of all existing proofs are unchanged. The Enum model reads `java/lang/Enum.name`/`ordinal` the same way
+  (an enum may declare its own `name`/`ordinal` fields).
+- **Methods**: `resolve_method` (5.4.3.3 / 5.4.3.4, incl. ICCE for class/interface mismatch, NoSuchMethodError,
+  maximally-specific superinterface methods), `select_virtual` (5.4.6: a private resolved method is selected as is,
+  overriding per 5.4.5 incl. package-private methods across packages and the transitive case, maximally-specific
+  defaults, AbstractMethodError / ICCE / IllegalAccessError), `select_special` (invokespecial: super calls start at the
+  direct superclass of the current class; `I.super.m()`). invokestatic initialises the declaring class.
+  `resolve_full p c n d` is the fast path the step lemmas use: the method an object of class `c` runs when that does
+  not depend on the resolved method (no private declaration of `n d` in the hierarchy other than the only one, no
+  package-private overriding question, not abstract, unique non-abstract maximally-specific default); otherwise the
+  machine asks the JDK model and then performs full resolution and selection.
+- **Initialisation order** (5.5 steps 6, 7): all not-yet-started classes of the superclass chain are marked and their
+  ConstantValue fields set before any `<clinit>` runs (circular initialisation sees the subclass "in progress"), then
+  `<clinit>`s run outermost first; before a class's `<clinit>` its superinterfaces that declare a non-abstract,
+  non-static method are initialised in JVMS order (a pending `<clinit>` frame at pc -1); an exception through a pending
+  frame marks that class erroneous.
+
 ## Proof infrastructure
 - `Core/Tactics.v`: symbolic execution of the frame interpreter (`symex`), used for int-only methods.
+- `Core/Logic.v` (statement change, 2026-10-24): `mstep_getfield` / `mstep_putfield` now take `obj_get p fr fs = Some v` /
+  `obj_set p fr v fs = Some fs'` instead of `assoc (fr_name fr) fs` / `set_assoc (fr_name fr) v fs` (with shadowed fields
+  the plain-name lookup is wrong for a field of the superclass; for an object without shadowed fields both reduce to the
+  old lookup by computation, so every call site `... | reflexivity | ...` is unchanged).
 - `Core/Logic.v`: run segments (`leads`, `returns`, `returns_weaken`), fuel composition, and step lemmas
   (`mstep_local`, `mstep_local_return`, `mstep_invoke`, `do_invoke_static_model`, `do_invoke_string_model`,
   getfield/putfield/getstatic/aaload/aastore/new/anewarray/ldc-String, invokespecial/virtual/static entry,
@@ -90,7 +123,10 @@ Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-i
 
 ## Not done yet / known limitations
 - `jsr`/`ret` (not needed), dynamic constants, `Foo::new`, `altMetafactory`, switch-pattern and record bootstraps.
-- Interface default-method selection takes the first default found (JVMS "maximally specific" not checked).
-- Static fields inherited from a superclass (getstatic resolution through superclasses) are `STUCK`.
+- invokeinterface where several maximally-specific default methods match: JVMS 6.5 says
+  IncompatibleClassChangeError, HotSpot 21 throws AbstractMethodError (corpus7 `changed`, case 1): `STUCK` (no claim).
+- Access control (IllegalAccessError for private/protected/package access, putstatic to a final field outside
+  `<clinit>`) and loader constraints are not checked: javac never emits such accesses in a jointly compiled program.
+- Fast paths assume a link-consistent class set (see "Field and method resolution" below and TRUST.md).
 - Exception objects carry no message/cause/stack trace (only the class is observable in the model).
 - Threads: Track C. Reflection, class loaders: later phases.

@@ -6,6 +6,7 @@ theories/Core/Instr.v
 theories/Core/Desc.v
 theories/Core/Semantics.v
 theories/Core/Tactics.v
+theories/Core/JdkTables.v
 theories/Core/Machine.v
 theories/Core/Logic.v
 theories/Jdk/Strings.v

@@ -171,12 +171,13 @@ Lemma mstep_getfield : forall s top rest fr nx l r c fs v,
   fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Getfield fr, nx) ->
   f_stack (cf_frame top) = VRef l :: r ->
   ms_heap s l = Some (OObj c fs) ->
-  assoc (fr_name fr) fs = Some v ->
+  obj_get p fr fs = Some v ->
   (stack_slots (v :: r) <=? c_max_stack (cf_code top))%Z = true ->
   mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (v :: r) (f_locals (cf_frame top))) :: rest)).
 Proof.
   intros s top rest fr nx l r c fs v Hfr Hf Hst Hh Ha Hb.
-  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+  unfold obj_get in Ha. destruct (field_slot p fr fs) as [key| |] eqn:Hk; try discriminate Ha.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
 
 Lemma mstep_putfield : forall s top rest fr nx v l r c fs t fs',
@@ -186,7 +187,7 @@ Lemma mstep_putfield : forall s top rest fr nx v l r c fs t fs',
   field_type (fr_desc fr) = Some t ->
   value_fits t v = true ->
   ms_heap s l = Some (OObj c fs) ->
-  set_assoc (fr_name fr) (narrow_store t v) fs = Some fs' ->
+  obj_set p fr (narrow_store t v) fs = Some fs' ->
   (stack_slots r <=? c_max_stack (cf_code top))%Z = true ->
   mstep_of p mdl s =
     MNext (with_frames {| ms_heap := upd (ms_heap s) l (OObj c fs'); ms_next := ms_next s;
@@ -195,9 +196,10 @@ Lemma mstep_putfield : forall s top rest fr nx v l r c fs t fs',
              (set_frame top (mkframe nx r (f_locals (cf_frame top))) :: rest)).
 Proof.
   intros s top rest fr nx v l r c fs t fs' Hfr Hf Hst Ht Hv Hh Ha Hb.
+  unfold obj_set in Ha. destruct (field_slot p fr fs) as [key| |] eqn:Hk; try discriminate Ha.
   unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Ht.
   destruct v; cbn [value_fits] in Hv; try discriminate Hv; cbn [negb];
-  rewrite ?Hv; cbn [negb]; rewrite Hh, Ha; cbv beta iota zeta; cbn [f_stack f_pc f_locals]; rewrite Hb; reflexivity.
+  rewrite ?Hv; cbn [negb]; rewrite Hh, Hk, Ha; cbv beta iota zeta; cbn [f_stack f_pc f_locals]; rewrite Hb; reflexivity.
 Qed.
 
 Lemma mstep_getstatic : forall s top rest fr nx v,
@@ -211,7 +213,9 @@ Lemma mstep_getstatic : forall s top rest fr nx v,
                          (mkframe nx (v :: f_stack (cf_frame top)) (f_locals (cf_frame top))) :: rest)).
 Proof.
   intros s top rest fr nx v Hfr Hf He Hi Ha Hb.
-  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite He, Hi, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+  assert (Ht : static_target p s fr = STKey (static_key (fr_class fr) (fr_name fr)))
+    by (unfold static_target; rewrite He, Hi, Ha; reflexivity).
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Ht, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
 
 Lemma mstep_aaload : forall s top rest nx i l r e es v,
