@@ -1,18 +1,25 @@
 # rocq-jvm
 
-A formal model of the Java Virtual Machine in [Rocq](https://rocq-prover.org) (formerly Coq), used to prove
-properties of **real compiled Apache Camel bytecode for all inputs**.
+A formal model of the Java Virtual Machine in [Rocq](https://rocq-prover.org) (formerly Coq): the JVMS bytecode
+semantics, a class-file loader and models of the JDK library, all inside the prover. With it you can prove properties
+of **any compiled Java bytecode, for all inputs**, by stating what a method should do and proving that the real
+`.class` file does it.
 
-The proofs are about the actual `.class` files that `javac` produces from a recorded Camel commit. They are not
-about a hand translation of the Java source. The Rocq kernel checks every proof. The JVM model is checked against
-HotSpot (JDK 21) by differential testing on millions of random inputs.
+The model is general. Nothing in `theories/Core`, `theories/Loader` or `theories/Jdk` is specific to one project.
+The first case study is Apache Camel: the proofs in `theories/Camel` are about the actual `.class` files that
+`javac` produces from a recorded Camel commit, not about a hand translation of the source. The Rocq kernel checks
+every proof. The model is checked against HotSpot (JDK 21) by differential testing on millions of random inputs.
+
+To prove something about your own code, compile it, dump the class files with `tools/classdump.py`, load them as in
+`theories/Camel/CimProg.v`, and state the theorem. The Camel files show the pattern, from a single method
+(`WalCanUpdate.v`) to a whole class over every call sequence (`WalRing.v`, `CimSession.v`).
 
 Status: work in progress, started 2026-10-23. See [STATUS.md](STATUS.md) for the full list of what is proved and
 [TRUST.md](TRUST.md) for exactly what a reader has to trust.
 
 ---
 
-## The idea in one example
+## The idea, with a Camel example
 
 Camel's write-ahead log has a method `TransactionLog.canUpdate(...)`. It decides whether a log entry is still
 in the ring buffer and so may be updated. On Camel `main` it has a bug (CAMEL-26088), and a fix branch exists.
@@ -40,7 +47,7 @@ fixed before anything is proved with it.
 
 ---
 
-## Results so far
+## Results so far (Camel case study and the memory model)
 
 Every theorem below reports `Print Assumptions` = *Closed under the global context*: no axioms, nothing admitted.
 
