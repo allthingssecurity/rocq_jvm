@@ -2,7 +2,7 @@
 
 Rocq 9.3.0 + rocq-stdlib 9.2.0. Build: `make` (uses `rocq makefile`, `-j1`; about 16 minutes, most of it the
 kernel-computed whole-class checks in `WalScenario.v` and `CimScenario.v`). Trust base: `TRUST.md`. Opcode table: `docs/opcode-coverage.md`.
-Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-24 (night 1, second half).
+Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-24 (night 1, second half; model gaps: field/method resolution, initialisation order, invokedynamic bootstraps, exception messages — branch model-gaps).
 
 Every theorem listed below: `Print Assumptions` = "Closed under the global context" (no axioms, nothing admitted).
 
@@ -21,8 +21,9 @@ Every theorem listed below: `Print Assumptions` = "Closed under the global conte
 | reflection, class loaders, natives beyond the list above | | not started |
 
 Opcodes: **199 of 202** have semantics (`jsr`, `ret`, `jsr_w` are decoded and rejected: class files of version >= 51
-cannot contain them). Partial: `ldc` of MethodType/MethodHandle/dynamic constants, `invokedynamic` other than
-string concatenation and `LambdaMetafactory.metafactory` (no `Foo::new`, records' `ObjectMethods`, switch patterns).
+cannot contain them). Partial: `ldc` of MethodType/MethodHandle/dynamic constants, `invokedynamic` bootstraps other
+than StringConcatFactory, LambdaMetafactory (metafactory/altMetafactory), ObjectMethods and SwitchBootstraps (and
+the conversions listed under "Not done yet").
 **189** of the 199 occur in the differentially tested bytecode.
 
 Model bounds (a run that hits one is `STUCK`, i.e. no claim): arrays larger than 2^20 elements (OutOfMemoryError
@@ -45,6 +46,8 @@ a user object in string concatenation), identity hash codes.
 | `Sel` (corpus7: private methods incl. nestmates and private interface methods, maximally-specific defaults, package-private overriding across packages incl. JVMS 5.4.5 (b), super calls; classes recompiled separately: ICCE / AME / NoSuchMethodError / NoSuchFieldError, resolution before the null check) | 8 | 2,000 | 0 (172 of 2,000 inputs of `changed`/`changedCaught` are `STUCK` by design: the JVMS/HotSpot divergence below) |
 | `Indy` (corpus8, `--release 21`: `Foo::new` incl. initialisation and failing `<clinit>`, altMetafactory serializable/marker lambdas, record toString/equals/hashCode incl. float/double, NaN, -0.0, nulls and boxes, typeSwitch with Class/String/Integer labels and record patterns, sealed switch, enumSwitch) | 14 | 2,000 | 0 |
 | `Boxes` (corpus10: instanceof / checkcast / aastore of boxes, String, StringBuilder, enums into Serializable[] / Comparable[] / Constable[] / ConstantDesc[] / CharSequence[] / Number[], mixed varargs) | 4 | 2,000 | 0 |
+| `Msg` (corpus9: messages of ArithmeticException, ArrayIndexOutOfBounds, NegativeArraySize incl. multianewarray, ArrayStore, NoClassDefFoundError chains, ExceptionInInitializerError; uncaught and through getMessage()) | 11 | 2,000 | 0 (9,730 messages compared; the no-claims are the 2^20 array bound and Object.notify's message) |
+| all machine corpora above + `Heap`, `Strs`, `Lam`, `Flt`, cim hash, jdkmodel rerun with messages | 187 | 300 | 0 (1,345 messages compared) |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
 | camel-wal whole class (`WalScenario`: TransactionLog + LayerInfo + EntryContainer + LogEntry + EntryState) main + fix | 2 | 4,516 scenarios | 0 |
@@ -128,6 +131,16 @@ Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-i
   StringBuilder, Class, Enum, the JdkTables.v classes): e.g. an Integer is Serializable / Comparable / Constable /
   ConstantDesc, so `Serializable[]` from mixed varargs accepts it (was a wrong ArrayStoreException).
 
+## Exception messages (HotSpot 21 texts)
+The machine's own exceptions carry `detailMessage` (read by the Throwable.getMessage model, printed by the harness):
+`/ by zero` (idiv/irem/ldiv/lrem), `Index i out of bounds for length n` (all xaload/xastore),
+the negative count for NegativeArraySizeException (multianewarray: the first negative count met by HotSpot's
+depth-first allocation), `Class.getName()` of the stored value for ArrayStoreException, `current thread is not
+owner` (monitorexit), `Could not initialize class X` for NoClassDefFoundError (X = the first erroneous class of
+the superclass chain; the classes below it become erroneous, JVMS 5.5 step 7), null for ExceptionInInitializerError.
+`DiffRunner` prints `E <class> m:<hex units>|m:null`; `compare.py` compares the message when the model prints one
+and counts it (`messages_compared`).
+
 ## Proof infrastructure
 - `Core/Tactics.v`: symbolic execution of the frame interpreter (`symex`), used for int-only methods.
 - `Core/Logic.v` (statement change, 2026-10-24): `mstep_getfield` / `mstep_putfield` now take `obj_get p fr fs = Some v` /
@@ -154,5 +167,10 @@ Next: the unbounded proof (put/remove/compact refine an insertion-ordered case-i
 - Access control (IllegalAccessError for private/protected/package access, putstatic to a final field outside
   `<clinit>`) and loader constraints are not checked: javac never emits such accesses in a jointly compiled program.
 - Fast paths assume a link-consistent class set (see "Field and method resolution" below and TRUST.md).
-- Exception objects carry no message/cause/stack trace (only the class is observable in the model).
+- Exception messages: only the exceptions the machine itself creates carry one (below); exceptions made by JDK models
+  (`MThrow`, e.g. NumberFormatException, Object.notify's IllegalMonitorStateException) and by user code
+  (`new RuntimeException("x")`) have no modelled message (getMessage() on them is `STUCK`, the harness compares
+  only their class). Helpful NullPointerException messages, ClassCastException messages (they name class loaders,
+  with identity hash codes under the harness's URLClassLoader) and the linkage errors' messages are not modelled.
+  No causes or stack traces.
 - Threads: Track C. Reflection, class loaders: later phases.

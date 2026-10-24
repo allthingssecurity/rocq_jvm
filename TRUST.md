@@ -53,6 +53,9 @@ HotSpot on random inputs, and a mismatch is treated as a model bug.
   machine arithmetic is involved) and run against HotSpot (`java` 21.0.12, `DiffRunner` via
   reflection) on the same inputs. Counts per method are in `harness/results/*.tsv` and STATUS.md.
 
+- Exception messages of VM-created exceptions are HotSpot 21's texts (the JVMS does not fix them); they are part
+  of the model and differentially tested (corpus9 `Msg`, and every uncaught one in the other corpora).
+
 ## 5. JDK models (specifications of JDK methods, trusted, differentially tested)
 `theories/Jdk/Jdk.v`, `theories/Jdk/Strings.v`. Each modelled method is a Rocq function written from the JDK 21
 source of java.base and checked against HotSpot by the corpora `harness/corpus3` (Strs), `corpus2` (Heap),
@@ -73,7 +76,10 @@ source of java.base and checked against HotSpot by the corpora `harness/corpus3`
 - `java.lang.Enum`: constructor, ordinal, name/toString, equals. `Object`: constructor, equals, getClass.
 - slf4j: `LoggerFactory.getLogger` returns an opaque object; `Logger.isXxxEnabled()` comes from the environment
   (`jenv.j_log_enabled`, theorems state it); every void `Logger` method has no effect on the modelled state.
-- Constructors of the java.lang exception classes: no observable state (messages/causes are not modelled).
+- Constructors of the java.lang exception classes: no observable state (messages/causes are not modelled);
+  `Throwable.getMessage`/`getLocalizedMessage` of a VM-created exception returns its `detailMessage`.
+- `Object.notify`/`notifyAll` (one thread: no effect when the caller owns the monitor, else IllegalMonitorStateException);
+  `Record.<init>()`.
 Not modelled on purpose: `Object.hashCode`/`identityHashCode` (nondeterministic), I/O, threads, reflection.
 
 ## 6. Test drivers and assumptions stated in theorems

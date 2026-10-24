@@ -34,7 +34,7 @@ PARTIAL = {'ldc': 'int/float/String/Class constants; MethodType/MethodHandle/dyn
 SEM |= set(PARTIAL)
 targets = set()
 for t in ('harness/targets-phase1.txt', 'harness/targets-stackops.txt', 'harness/targets-ops2.txt', 'harness/targets-heap.txt', 'harness/targets-strs.txt', 'harness/targets-flt.txt', 'harness/targets-lam.txt',
-          'harness/targets-fld.txt', 'harness/targets-sel.txt', 'harness/targets-indy.txt', 'harness/targets-box.txt'):
+          'harness/targets-fld.txt', 'harness/targets-sel.txt', 'harness/targets-indy.txt', 'harness/targets-box.txt', 'harness/targets-msg.txt'):
     for line in open(t):
         if line.strip():
             d, c, m, desc = line.split()[:4]

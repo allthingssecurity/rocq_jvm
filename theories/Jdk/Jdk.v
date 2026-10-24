@@ -655,6 +655,12 @@ Definition object_model (name desc : string) (args : list value) (s : mstate) : 
                   end
       | _ => MStuckModel "getClass"
       end
+    else if (String.eqb name "notify" || String.eqb name "notifyAll") && String.eqb desc "()V" then
+      (* one thread: no other thread waits; the caller must own the monitor *)
+      match this with
+      | VRef l => if (0 <? lock_count (ms_locks s) l)%Z then MOk None s else MThrow "java/lang/IllegalMonitorStateException"
+      | _ => MStuckModel "notify"
+      end
     else if String.eqb name "clone" && String.eqb desc "()Ljava/lang/Object;" then
       match arr_of s this with
       | Some (_, t, es) => ret_new s (OArr t es)
@@ -674,6 +680,21 @@ Definition jdk_model (p : program) (e : jenv) : model :=
            || String.eqb desc "(Ljava/lang/String;Ljava/lang/Throwable;)V"
            || String.eqb desc "(Ljava/lang/Throwable;)V") then MOk None s
     else if String.eqb cls "java/lang/Record" && String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
+    (* Throwable.getMessage / getLocalizedMessage of a VM-created exception
+       (Machine.throw_msg); other exception objects carry no modelled message *)
+    else if is_builtin_throwable cls && (String.eqb name "getMessage" || String.eqb name "getLocalizedMessage")
+            && String.eqb desc "()Ljava/lang/String;" then
+      match args with
+      | [VRef l] => match ms_heap s l with
+                    | Some (OObj c fs) =>
+                        match find_class p c, assoc "detailMessage" fs with
+                        | None, Some v => MOk (Some v) s
+                        | _, _ => MStuckModel "exception message not modelled"
+                        end
+                    | _ => MStuckModel "getMessage"
+                    end
+      | _ => MStuckModel "getMessage"
+      end
     else if String.eqb cls "java/lang/Object" then
       if String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
       else object_model name desc args s

@@ -566,7 +566,7 @@ Fixpoint unwind (p : program) (s : mstate) (exn : Z) (t : jtype) (fs : list cfra
           | Some true => unwind p s1 exn t rest
           | Some false =>
               let l := ms_next s1 in
-              let s2 := {| ms_heap := upd (ms_heap s1) l (OObj "java/lang/ExceptionInInitializerError" nil);
+              let s2 := {| ms_heap := upd (ms_heap s1) l (OObj "java/lang/ExceptionInInitializerError" [("detailMessage", VNull)]);
                            ms_next := l + 1; ms_statics := ms_statics s1; ms_inited := ms_inited s1;
                            ms_locks := ms_locks s1; ms_frames := ms_frames s1 |} in
               unwind p s2 l (TRef "java/lang/ExceptionInInitializerError") rest
@@ -586,8 +586,29 @@ Definition throw_obj (p : program) (s : mstate) (exn : Z) : mstep :=
 Definition throw_new (p : program) (s : mstate) (cls : string) : mstep :=
   let (l, s') := alloc s (OObj cls nil) in throw_obj p s' l.
 
+(** A VM-created exception with its message (JVMS leaves messages to the
+    implementation; these are HotSpot 21's, compared by the differential
+    harness): the message is the field "detailMessage" (a String or null), read
+    by the model of Throwable.getMessage. *)
+Definition throw_msg (p : program) (s : mstate) (cls : string) (msg : option (list Z)) : mstep :=
+  match msg with
+  | Some u => let (m, s1) := alloc s (OStr u) in
+              let (l, s2) := alloc s1 (OObj cls [("detailMessage", VRef m)]) in throw_obj p s2 l
+  | None => let (l, s1) := alloc s (OObj cls [("detailMessage", VNull)]) in throw_obj p s1 l
+  end.
+
+Fixpoint ascii_units (s : string) : list Z :=
+  match s with EmptyString => nil | String c r => Z.of_nat (nat_of_ascii c) :: ascii_units r end.
+
+(** Class.getName: the binary name with '.' (arrays: their descriptor with '.'). *)
+Definition dotted (u : list Z) : list Z := map (fun c => if c =? 47 then 46 else c) u.
+Definition class_name_units (c : string) : list Z :=
+  dotted (match utf8_units c with Some u => u | None => ascii_units c end).
+
 Definition NPE := "java/lang/NullPointerException".
 Definition AIOOBE := "java/lang/ArrayIndexOutOfBoundsException".
+Definition aioobe_msg (i : Z) (n : nat) : list Z :=
+  app (ascii_units "Index ") (app (z_units i) (app (ascii_units " out of bounds for length ") (z_units (Z.of_nat n)))).
 
 (** ** Class initialisation (JVMS 5.5, single thread). *)
 (** A class whose <clinit> failed is erroneous: later uses throw NoClassDefFoundError. *)
@@ -601,6 +622,37 @@ Fixpoint erroneous (p : program) (fuel : nat) (statics : list (string * value)) 
                         | None => match cf_super cf with Some sup => erroneous p k statics sup | None => false end
                         end
            end
+  end.
+
+(** NoClassDefFoundError for [c], whose class or a superclass is erroneous
+    (JVMS 5.5 steps 5 and 7): the exception names the first erroneous class
+    on the chain ("Could not initialize class X", HotSpot 21), and the classes
+    below it whose initialisation had not started become erroneous too. *)
+Fixpoint first_err (p : program) (fuel : nat) (statics : list (string * value)) (c : string)
+  : option (string * list string) :=
+  match fuel with
+  | O => None
+  | S k => match find_class p c with
+           | None => None
+           | Some cf => match assoc ("#err:" ++ c) statics with
+                        | Some _ => Some (c, nil)
+                        | None => match cf_super cf with
+                                  | Some sup => option_map (fun '(e, l) => (e, c :: l)) (first_err p k statics sup)
+                                  | None => None
+                                  end
+                        end
+           end
+  end.
+
+Definition ncdfe (p : program) (s : mstate) (c : string) : mstep :=
+  match first_err p 64 (ms_statics s) c with
+  | Some (e, below) =>
+      let s1 := {| ms_heap := ms_heap s; ms_next := ms_next s;
+                   ms_statics := app (map (fun x => ("#err:" ++ x, VInt 1)) below) (ms_statics s);
+                   ms_inited := app below (ms_inited s); ms_locks := ms_locks s; ms_frames := ms_frames s |} in
+      throw_msg p s1 "java/lang/NoClassDefFoundError"
+                (Some (app (ascii_units "Could not initialize class ") (class_name_units e)))
+  | None => throw_new p s "java/lang/NoClassDefFoundError"
   end.
 
 (** The outermost loaded superclass of [c] (or [c] itself) whose
@@ -779,7 +831,7 @@ Definition clinit_prepare (p : program) (s : mstate) (top : cframe) (rest : list
                        (init_ifaces p cf) in
     match todo with
     | nil => MNext (with_frames s (set_frame top (mkframe 0 nil (f_locals (cf_frame top))) :: rest))
-    | i :: _ => if erroneous p 64 (ms_statics s) i then throw_new p s "java/lang/NoClassDefFoundError"
+    | i :: _ => if erroneous p 64 (ms_statics s) i then ncdfe p s i
                 else init_class p s i
     end
   end.
@@ -1196,7 +1248,7 @@ Definition obj_set (p : program) (fr : fieldref) (v : value) (fs : list (string 
   match field_slot p fr fs with FSKey k => set_assoc k v fs | _ => None end.
 
 (** Static field access: the key in [ms_statics] of the field, or what to do first. *)
-Inductive starget : Type := STKey (k : string) | STInit (d : string) | STThrow (exc : string)
+Inductive starget : Type := STKey (k : string) | STInit (d : string) | STThrow (exc : string) | STNcdfe (d : string)
                           | STJdk (d : string) | STStuck (why : string).
 
 (** Fast path: the referenced class declares the field (its key exists exactly
@@ -1215,7 +1267,7 @@ Definition static_target (p : program) (s : mstate) (fr : fieldref) : starget :=
   match resolve_field p fr with
   | FFound d a =>
       if negb (acc_static a) then STThrow ICCE
-      else if erroneous p 64 (ms_statics s) d then STThrow "java/lang/NoClassDefFoundError"
+      else if erroneous p 64 (ms_statics s) d then STNcdfe d
       else match init_needed p 64 (ms_inited s) d with
            | Some _ => STInit d
            | None => match find_class p d with
@@ -1512,7 +1564,7 @@ Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref 
                new object is the result (pushed below the constructor's frame,
                as new/dup/invokespecial does). *)
             let c := mr_class impl in
-            if erroneous p 64 (ms_statics s) c then throw_new p s "java/lang/NoClassDefFoundError" else
+            if erroneous p 64 (ms_statics s) c then ncdfe p s c else
             match init_needed p 64 (ms_inited s) c with
             | Some _ => init_class p s c
             | None =>
@@ -1599,7 +1651,7 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
         match resolve_method p (mr_interface mr) (mr_class mr) (mr_name mr) (mr_desc mr) with
         | RFound (d, a, om) =>
             if negb (acc_static a) then throw_new p s ICCE
-            else if erroneous p 64 (ms_statics s) d then throw_new p s "java/lang/NoClassDefFoundError"
+            else if erroneous p 64 (ms_statics s) d then ncdfe p s d
             else match init_needed p 64 (ms_inited s) d with
                  | Some _ => init_class p s d
                  | None => match om with
@@ -2009,6 +2061,19 @@ Fixpoint switch_index (p : program) (s : mstate) (o : Z) (lbs : list slabel) (i 
                end
   end.
 
+(** multianewarray with a negative count: HotSpot allocates depth first, so the
+    NegativeArraySizeException names the first negative count met on the way down
+    (after a zero count, the first negative of the remaining ones); an allocation
+    above the model bound before that is [None] (OutOfMemoryError possible). *)
+Fixpoint multi_neg (ns : list Z) : option (option Z) :=
+  match ns with
+  | nil => Some None
+  | n :: r => if n <? 0 then Some (Some n)
+              else if n =? 0 then Some (match filter (fun k => k <? 0) r with k :: _ => Some k | nil => None end)
+              else if MAX_ARRAY <? n then (if existsb (fun k => k <? 0) r then None else multi_neg r)
+              else multi_neg r
+  end.
+
 (** multianewarray: nested arrays for the given counts (outermost first). *)
 Fixpoint multi_alloc (fuel : nat) (s : mstate) (t : jtype) (counts : list Z) : option (Z * mstate) :=
   match fuel with
@@ -2152,14 +2217,15 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
       match step c (cf_rt top) f with
       | Normal f' => put_top f' s
       | Done v => if cf_clinit top then return_to s None rest else return_to s v rest
-      | Throw cn => throw_new p s cn
+      | Throw cn => if String.eqb cn "java/lang/ArithmeticException"
+                    then throw_msg p s cn (Some (ascii_units "/ by zero")) else throw_new p s cn
       | Stuck why => MStuck why
       end
     else
     match i with
     (* ---- objects ---- *)
     | New cn =>
-        if erroneous p 64 (ms_statics s) cn then throw_new p s "java/lang/NoClassDefFoundError" else
+        if erroneous p 64 (ms_statics s) cn then ncdfe p s cn else
         match init_needed p 64 (ms_inited s) cn with
         | Some _ => init_class p s cn
         | None =>
@@ -2218,6 +2284,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             end
         | STInit d => init_class p s d
         | STThrow e => throw_new p s e
+        | STNcdfe d => ncdfe p s d
         | STJdk d =>
             (* a static field of a JDK class: its model, as a pseudo-method "<get>name" *)
             match mdl d ("<get>" ++ fr_name fr) (fr_desc fr) nil s with
@@ -2244,6 +2311,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
           end
         | STInit d => init_class p s d
         | STThrow e => throw_new p s e
+        | STNcdfe d => ncdfe p s d
         | STJdk d => MStuck ("putstatic to a static field of a JDK class: " ++ d ++ "." ++ fr_name fr)
         | STStuck why => MStuck why
         end
@@ -2251,7 +2319,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
     | Newarray t =>
         match st, elem_of_atype t with
         | VInt n :: r, Some e =>
-            if n <? 0 then throw_new p s "java/lang/NegativeArraySizeException"
+            if n <? 0 then throw_msg p s "java/lang/NegativeArraySizeException" (Some (z_units n))
             else if MAX_ARRAY <? n then MStuck "array larger than the model bound (OutOfMemoryError possible)"
             else let (l, s') := alloc s (OArr e (repeat (default_of e) (Z.to_nat n))) in go (VRef l :: r) s'
         | _, _ => MStuck "newarray: operand"
@@ -2259,7 +2327,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
     | Anewarray cn =>
         match st with
         | VInt n :: r =>
-            if n <? 0 then throw_new p s "java/lang/NegativeArraySizeException"
+            if n <? 0 then throw_msg p s "java/lang/NegativeArraySizeException" (Some (z_units n))
             else if MAX_ARRAY <? n then MStuck "array larger than the model bound (OutOfMemoryError possible)"
             else let (l, s') := alloc s (OArr (class_type cn) (repeat VNull (Z.to_nat n))) in go (VRef l :: r) s'
         | _ => MStuck "anewarray: operand"
@@ -2281,7 +2349,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             match h l with
             | Some (OArr e es) =>
                 if negb (akind_load_ok k e) then MStuck "xaload: array kind" else
-                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_new p s AIOOBE
+                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_msg p s AIOOBE (Some (aioobe_msg idx (length es)))
                 else match nth_z es idx with Some v => go (v :: r) s | None => MStuck "xaload" end
             | _ => MStuck "xaload: not an array"
             end
@@ -2294,7 +2362,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             match h l with
             | Some (OArr e es) =>
                 if negb (akind_ok k e v) then MStuck "xastore: array kind" else
-                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_new p s AIOOBE
+                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_msg p s AIOOBE (Some (aioobe_msg idx (length es)))
                 else
                   let store s := go r {| ms_heap := upd h l (OArr e (set_nth_z es idx (narrow_store e v)));
                                          ms_next := ms_next s; ms_statics := ms_statics s;
@@ -2307,7 +2375,12 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                           match obj_assignable p o (match e with TArr _ => type_desc e
                                                                      | TRef c => c | _ => "" end) with
                           | Some true => store s
-                          | Some false => throw_new p s "java/lang/ArrayStoreException"
+                          | Some false => match o with
+                                          | OLam _ _ _ _ _ => throw_new p s "java/lang/ArrayStoreException"
+                                          | _ => throw_msg p s "java/lang/ArrayStoreException"
+                                                           (Some (class_name_units (match runtime_type o with
+                                                                                    | TRef c => c | t => type_desc t end)))
+                                          end
                           | None => MStuck "aastore: cannot decide the element type"
                           end
                       | None => MStuck "aastore: dangling reference"
@@ -2368,7 +2441,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         | VNull :: _ => throw_new p s NPE
         | VRef l :: r =>
             let n := lock_count (ms_locks s) l in
-            if n <=? 0 then throw_new p s "java/lang/IllegalMonitorStateException"
+            if n <=? 0 then throw_msg p s "java/lang/IllegalMonitorStateException" (Some (ascii_units "current thread is not owner"))
             else go r {| ms_heap := h; ms_next := ms_next s; ms_statics := ms_statics s;
                          ms_inited := ms_inited s; ms_locks := (l, n - 1) :: ms_locks s;
                          ms_frames := ms_frames s |}
@@ -2441,13 +2514,17 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             if negb (forallb (fun v => match v with VInt _ => true | _ => false end) counts)
             then MStuck "multianewarray: operand" else
             let ns := map (fun v => match v with VInt n => n | _ => 0 end) counts in
-            if existsb (fun n => n <? 0) ns then throw_new p s "java/lang/NegativeArraySizeException"
-            else if existsb (fun n => MAX_ARRAY <? n) ns || (MAX_ARRAY <? fold_left Z.mul ns 1)
+            match multi_neg ns with
+            | None => MStuck "array larger than the model bound (OutOfMemoryError possible)"
+            | Some (Some n) => throw_msg p s "java/lang/NegativeArraySizeException" (Some (z_units n))
+            | Some None =>
+            if existsb (fun n => MAX_ARRAY <? n) ns || (MAX_ARRAY <? fold_left Z.mul ns 1)
             then MStuck "array larger than the model bound (OutOfMemoryError possible)"
             else match multi_alloc 256 s (class_type cn) ns with
                  | Some (l, s') => go (VRef l :: r) s'
                  | None => MStuck "multianewarray: type"
                  end
+            end
         | None => MStuck "multianewarray: operand stack"
         end
     | _ => MStuck "unreachable: frame-local instruction"

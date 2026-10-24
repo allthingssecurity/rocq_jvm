@@ -12,12 +12,12 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 0 | nop | yes | yes | yes (1 sites) |
 | 1 | aconst_null | yes | yes | yes (35 sites) |
 | 2 | iconst_m1 | yes | yes | yes (10 sites) |
-| 3 | iconst_0 | yes | yes | yes (222 sites) |
-| 4 | iconst_1 | yes | yes | yes (197 sites) |
-| 5 | iconst_2 | yes | yes | yes (112 sites) |
-| 6 | iconst_3 | yes | yes | yes (394 sites) |
-| 7 | iconst_4 | yes | yes | yes (62 sites) |
-| 8 | iconst_5 | yes | yes | yes (51 sites) |
+| 3 | iconst_0 | yes | yes | yes (225 sites) |
+| 4 | iconst_1 | yes | yes | yes (207 sites) |
+| 5 | iconst_2 | yes | yes | yes (118 sites) |
+| 6 | iconst_3 | yes | yes | yes (396 sites) |
+| 7 | iconst_4 | yes | yes | yes (64 sites) |
+| 8 | iconst_5 | yes | yes | yes (52 sites) |
 | 9 | lconst_0 | yes | yes | yes (23 sites) |
 | 10 | lconst_1 | yes | yes | yes (5 sites) |
 | 11 | fconst_0 | yes | yes | yes (2 sites) |
@@ -25,9 +25,9 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 13 | fconst_2 | yes | yes | yes (1 sites) |
 | 14 | dconst_0 | yes | yes | yes (2 sites) |
 | 15 | dconst_1 | yes | yes | yes (3 sites) |
-| 16 | bipush | yes | yes | yes (7304 sites) |
-| 17 | sipush | yes | yes | yes (260 sites) |
-| 18 | ldc | yes | partial: int/float/String/Class constants; MethodType/MethodHandle/dynamic constants not yet | yes (37 sites) |
+| 16 | bipush | yes | yes | yes (7313 sites) |
+| 17 | sipush | yes | yes | yes (261 sites) |
+| 18 | ldc | yes | partial: int/float/String/Class constants; MethodType/MethodHandle/dynamic constants not yet | yes (39 sites) |
 | 19 | ldc_w | yes | partial: as ldc | yes (22 sites) |
 | 20 | ldc2_w | yes | partial: long/double constants (dynamic constants not yet) | yes (347 sites) |
 | 21 | iload | yes | yes | yes (434 sites) |
@@ -35,13 +35,13 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 23 | fload | yes | yes | yes (2 sites) |
 | 24 | dload | yes | yes | yes (4 sites) |
 | 25 | aload | yes | yes | yes (95 sites) |
-| 26 | iload_0 | yes | yes | yes (319 sites) |
-| 27 | iload_1 | yes | yes | yes (3710 sites) |
+| 26 | iload_0 | yes | yes | yes (347 sites) |
+| 27 | iload_1 | yes | yes | yes (3721 sites) |
 | 28 | iload_2 | yes | yes | yes (3684 sites) |
 | 29 | iload_3 | yes | yes | yes (32 sites) |
-| 30 | lload_0 | yes | yes | yes (36 sites) |
+| 30 | lload_0 | yes | yes | yes (37 sites) |
 | 31 | lload_1 | yes | yes | yes (35 sites) |
-| 32 | lload_2 | yes | yes | yes (24 sites) |
+| 32 | lload_2 | yes | yes | yes (25 sites) |
 | 33 | lload_3 | yes | yes | yes (2 sites) |
 | 34 | fload_0 | yes | yes | yes (17 sites) |
 | 35 | fload_1 | yes | yes | yes (11 sites) |
@@ -52,11 +52,11 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 40 | dload_2 | yes | yes | yes (13 sites) |
 | 41 | dload_3 | yes | yes | yes (2 sites) |
 | 42 | aload_0 | yes | yes | yes (43 sites) |
-| 43 | aload_1 | yes | yes | yes (171 sites) |
-| 44 | aload_2 | yes | yes | yes (91 sites) |
-| 45 | aload_3 | yes | yes | yes (54 sites) |
-| 46 | iaload | yes | yes | yes (12 sites) |
-| 47 | laload | yes | yes | yes (1 sites) |
+| 43 | aload_1 | yes | yes | yes (178 sites) |
+| 44 | aload_2 | yes | yes | yes (99 sites) |
+| 45 | aload_3 | yes | yes | yes (55 sites) |
+| 46 | iaload | yes | yes | yes (13 sites) |
+| 47 | laload | yes | yes | yes (2 sites) |
 | 48 | faload | yes | yes | yes (2 sites) |
 | 49 | daload | yes | yes | yes (1 sites) |
 | 50 | aaload | yes | yes | yes (18 sites) |
@@ -69,7 +69,7 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 57 | dstore | yes | yes | yes (2 sites) |
 | 58 | astore | yes | yes | yes (63 sites) |
 | 59 | istore_0 | yes | yes | yes (4 sites) |
-| 60 | istore_1 | yes | yes | yes (3635 sites) |
+| 60 | istore_1 | yes | yes | yes (3642 sites) |
 | 61 | istore_2 | yes | yes | yes (52 sites) |
 | 62 | istore_3 | yes | yes | yes (27 sites) |
 | 63 | lstore_0 | yes | yes | yes (1 sites) |
@@ -85,27 +85,27 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 73 | dstore_2 | yes | yes | no |
 | 74 | dstore_3 | yes | yes | yes (2 sites) |
 | 75 | astore_0 | yes | yes | no |
-| 76 | astore_1 | yes | yes | yes (79 sites) |
-| 77 | astore_2 | yes | yes | yes (38 sites) |
-| 78 | astore_3 | yes | yes | yes (45 sites) |
-| 79 | iastore | yes | yes | yes (8 sites) |
+| 76 | astore_1 | yes | yes | yes (83 sites) |
+| 77 | astore_2 | yes | yes | yes (44 sites) |
+| 78 | astore_3 | yes | yes | yes (46 sites) |
+| 79 | iastore | yes | yes | yes (9 sites) |
 | 80 | lastore | yes | yes | yes (1 sites) |
 | 81 | fastore | yes | yes | yes (1 sites) |
 | 82 | dastore | yes | yes | yes (1 sites) |
-| 83 | aastore | yes | yes | yes (28 sites) |
+| 83 | aastore | yes | yes | yes (29 sites) |
 | 84 | bastore | yes | yes | yes (7 sites) |
 | 85 | castore | yes | yes | yes (3 sites) |
 | 86 | sastore | yes | yes | yes (2 sites) |
 | 87 | pop | yes | yes | yes (11 sites) |
 | 88 | pop2 | yes | yes | yes (2 sites) |
-| 89 | dup | yes | yes | yes (118 sites) |
+| 89 | dup | yes | yes | yes (120 sites) |
 | 90 | dup_x1 | yes | yes | yes (1 sites) |
 | 91 | dup_x2 | yes | yes | yes (2 sites) |
 | 92 | dup2 | yes | yes | yes (3 sites) |
 | 93 | dup2_x1 | yes | yes | yes (2 sites) |
 | 94 | dup2_x2 | yes | yes | yes (4 sites) |
 | 95 | swap | yes | yes | yes (1 sites) |
-| 96 | iadd | yes | yes | yes (7672 sites) |
+| 96 | iadd | yes | yes | yes (7680 sites) |
 | 97 | ladd | yes | yes | yes (199 sites) |
 | 98 | fadd | yes | yes | yes (6 sites) |
 | 99 | dadd | yes | yes | yes (7 sites) |
@@ -113,16 +113,16 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 101 | lsub | yes | yes | yes (5 sites) |
 | 102 | fsub | yes | yes | yes (4 sites) |
 | 103 | dsub | yes | yes | yes (5 sites) |
-| 104 | imul | yes | yes | yes (3955 sites) |
+| 104 | imul | yes | yes | yes (3957 sites) |
 | 105 | lmul | yes | yes | yes (282 sites) |
 | 106 | fmul | yes | yes | yes (4 sites) |
 | 107 | dmul | yes | yes | yes (7 sites) |
-| 108 | idiv | yes | yes | yes (10 sites) |
+| 108 | idiv | yes | yes | yes (11 sites) |
 | 109 | ldiv | yes | yes | yes (3 sites) |
 | 110 | fdiv | yes | yes | yes (1 sites) |
 | 111 | ddiv | yes | yes | yes (5 sites) |
-| 112 | irem | yes | yes | yes (19 sites) |
-| 113 | lrem | yes | yes | yes (3 sites) |
+| 112 | irem | yes | yes | yes (21 sites) |
+| 113 | lrem | yes | yes | yes (4 sites) |
 | 114 | frem | yes | yes | yes (1 sites) |
 | 115 | drem | yes | yes | yes (1 sites) |
 | 116 | ineg | yes | yes | yes (7 sites) |
@@ -131,21 +131,21 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 119 | dneg | yes | yes | yes (1 sites) |
 | 120 | ishl | yes | yes | yes (5 sites) |
 | 121 | lshl | yes | yes | yes (3 sites) |
-| 122 | ishr | yes | yes | yes (11 sites) |
+| 122 | ishr | yes | yes | yes (14 sites) |
 | 123 | lshr | yes | yes | yes (3 sites) |
 | 124 | iushr | yes | yes | yes (5 sites) |
 | 125 | lushr | yes | yes | yes (6 sites) |
-| 126 | iand | yes | yes | yes (118 sites) |
+| 126 | iand | yes | yes | yes (133 sites) |
 | 127 | land | yes | yes | yes (4 sites) |
-| 128 | ior | yes | yes | yes (30 sites) |
+| 128 | ior | yes | yes | yes (31 sites) |
 | 129 | lor | yes | yes | yes (1 sites) |
 | 130 | ixor | yes | yes | yes (8 sites) |
 | 131 | lxor | yes | yes | yes (56 sites) |
 | 132 | iinc | yes | yes | yes (49 sites) |
-| 133 | i2l | yes | yes | yes (191 sites) |
+| 133 | i2l | yes | yes | yes (193 sites) |
 | 134 | i2f | yes | yes | yes (4 sites) |
 | 135 | i2d | yes | yes | yes (4 sites) |
-| 136 | l2i | yes | yes | yes (10 sites) |
+| 136 | l2i | yes | yes | yes (11 sites) |
 | 137 | l2f | yes | yes | yes (1 sites) |
 | 138 | l2d | yes | yes | yes (4 sites) |
 | 139 | f2i | yes | yes | yes (1 sites) |
@@ -162,7 +162,7 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 150 | fcmpg | yes | yes | yes (2 sites) |
 | 151 | dcmpl | yes | yes | yes (4 sites) |
 | 152 | dcmpg | yes | yes | yes (2 sites) |
-| 153 | ifeq | yes | yes | yes (110 sites) |
+| 153 | ifeq | yes | yes | yes (119 sites) |
 | 154 | ifne | yes | yes | yes (16 sites) |
 | 155 | iflt | yes | yes | yes (5 sites) |
 | 156 | ifge | yes | yes | yes (6 sites) |
@@ -176,38 +176,38 @@ JVMS SE 21 chapter 6 has 202 opcodes (0-201). All are decoded by `theories/Loade
 | 164 | if_icmple | yes | yes | yes (11 sites) |
 | 165 | if_acmpeq | yes | yes | yes (2 sites) |
 | 166 | if_acmpne | yes | yes | yes (15 sites) |
-| 167 | goto | yes | yes | yes (249 sites) |
+| 167 | goto | yes | yes | yes (260 sites) |
 | 168 | jsr | yes | no | no |
 | 169 | ret | yes | no | no |
-| 170 | tableswitch | yes | yes | yes (12 sites) |
+| 170 | tableswitch | yes | yes | yes (13 sites) |
 | 171 | lookupswitch | yes | yes | yes (4 sites) |
-| 172 | ireturn | yes | yes | yes (217 sites) |
-| 173 | lreturn | yes | yes | yes (54 sites) |
+| 172 | ireturn | yes | yes | yes (226 sites) |
+| 173 | lreturn | yes | yes | yes (55 sites) |
 | 174 | freturn | yes | yes | yes (12 sites) |
 | 175 | dreturn | yes | yes | yes (12 sites) |
-| 176 | areturn | yes | yes | yes (18 sites) |
+| 176 | areturn | yes | yes | yes (25 sites) |
 | 177 | return | yes | yes | yes (2 sites) |
-| 178 | getstatic | yes | partial: field resolution through superclasses and superinterfaces (JVMS 5.4.3.2), initialises the declaring class; JDK static fields with a model (Boolean.TRUE/FALSE) | yes (56 sites) |
+| 178 | getstatic | yes | partial: field resolution through superclasses and superinterfaces (JVMS 5.4.3.2), initialises the declaring class; JDK static fields with a model (Boolean.TRUE/FALSE) | yes (60 sites) |
 | 179 | putstatic | yes | yes | yes (9 sites) |
 | 180 | getfield | yes | yes | yes (32 sites) |
 | 181 | putfield | yes | yes | yes (9 sites) |
-| 182 | invokevirtual | yes | partial: loaded classes + JDK methods that have a model (TRUST.md) | yes (151 sites) |
-| 183 | invokespecial | yes | partial: as invokevirtual | yes (87 sites) |
-| 184 | invokestatic | yes | partial: as invokevirtual | yes (114 sites) |
+| 182 | invokevirtual | yes | partial: loaded classes + JDK methods that have a model (TRUST.md) | yes (159 sites) |
+| 183 | invokespecial | yes | partial: as invokevirtual | yes (88 sites) |
+| 184 | invokestatic | yes | partial: as invokevirtual | yes (121 sites) |
 | 185 | invokeinterface | yes | partial: as invokevirtual; maximally-specific default methods, private interface methods (JVMS 5.4.6); lambda objects | yes (32 sites) |
-| 186 | invokedynamic | yes | partial: StringConcatFactory; LambdaMetafactory.metafactory/altMetafactory incl. Foo::new; ObjectMethods.bootstrap (records); SwitchBootstraps.typeSwitch/enumSwitch; no condy labels, no lambda boxing/return conversions | yes (39 sites) |
-| 187 | new | yes | yes | yes (87 sites) |
-| 188 | newarray | yes | yes | yes (23 sites) |
-| 189 | anewarray | yes | yes | yes (22 sites) |
-| 190 | arraylength | yes | yes | yes (34 sites) |
-| 191 | athrow | yes | yes | yes (11 sites) |
+| 186 | invokedynamic | yes | partial: StringConcatFactory; LambdaMetafactory.metafactory/altMetafactory incl. Foo::new; ObjectMethods.bootstrap (records); SwitchBootstraps.typeSwitch/enumSwitch; no condy labels, no lambda boxing/return conversions | yes (45 sites) |
+| 187 | new | yes | yes | yes (88 sites) |
+| 188 | newarray | yes | yes | yes (27 sites) |
+| 189 | anewarray | yes | yes | yes (27 sites) |
+| 190 | arraylength | yes | yes | yes (38 sites) |
+| 191 | athrow | yes | yes | yes (12 sites) |
 | 192 | checkcast | yes | yes | yes (48 sites) |
 | 193 | instanceof | yes | yes | yes (28 sites) |
-| 194 | monitorenter | yes | partial: single thread: entry counts only (threads: Track C) | yes (2 sites) |
-| 195 | monitorexit | yes | partial: as monitorenter | yes (4 sites) |
+| 194 | monitorenter | yes | partial: single thread: entry counts only (threads: Track C) | yes (3 sites) |
+| 195 | monitorexit | yes | partial: as monitorenter | yes (6 sites) |
 | 196 | wide | yes | yes | yes (284 sites) |
-| 197 | multianewarray | yes | yes | yes (2 sites) |
+| 197 | multianewarray | yes | yes | yes (3 sites) |
 | 198 | ifnull | yes | yes | yes (3 sites) |
-| 199 | ifnonnull | yes | yes | yes (1 sites) |
+| 199 | ifnonnull | yes | yes | yes (2 sites) |
 | 200 | goto_w | yes | yes | yes (2 sites) |
 | 201 | jsr_w | yes | no | no |
