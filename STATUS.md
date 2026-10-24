@@ -2,7 +2,7 @@
 
 Rocq 9.3.0 + rocq-stdlib 9.2.0. Build: `make` (uses `rocq makefile`, `-j1`; about 16 minutes, most of it the
 kernel-computed whole-class checks in `WalScenario.v` and `CimScenario.v`). Trust base: `TRUST.md`. Opcode table: `docs/opcode-coverage.md`.
-Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-24, early morning.
+Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-24, 08:00 IST.
 
 Every theorem listed below: `Print Assumptions` = "Closed under the global context" (no axioms, nothing admitted).
 
@@ -89,7 +89,14 @@ Unbounded, on the real bytecode of the fix, for **any heap** (no bound on sizes 
 | `CimAbs.find_correct`, `insert_ok`, `insert_keys_ok`, `remove_ok` | the table invariant (every bucket's chain lists exactly the used slots of that bucket, keys pairwise different ignoring case): findIndex finds the slot of the key or -1; insertion and removal preserve the invariant (for keys on which equalsIgnoreCase is an equivalence consistent with the hash — e.g. strings without surrogates, see `CimSpec`) |
 | `CimAbs2.c1_ok`, `c2_ok`, `c3_ok`, **`compact_ok`** | **compaction (the fix) keeps the table invariant, every entry and their order**, renumbers the used slots 0..size-1 and frees the rest; its three loops never fail on a valid table |
 | **`CimMap.get_map`, `remove_map`, `put_present_map`** | **the real bytecode of get / remove / put-of-a-present-key, on any heap holding a map in the invariant (`cim_rep`), returns exactly what the abstract insertion-ordered case-insensitive map returns, and leaves a map in the invariant whose entries are the abstract result** |
-Still open for the whole-class theorem: composing put of a *new* key (fast / grow / compact paths are each proved on the bytecode and on the invariant, the glue to `cim_rep` is not written yet), `resize` (needs (int)(n*0.75f) on the float model), and the induction over every operation sequence (as `WalRing.session_ok`).
+| `CimMap2.put_new_free_map`, `CimMap3.put_compact_map`, `put_grow_map` | put of a *new* key at map level, on each of its three paths (free slot / compaction / growth): the entry is appended to the abstract map and the invariant is kept; non-array objects and the free heap are untouched (`hframe`) |
+| **`CimSession.put_map`, `session_ok`** | **unbounded whole-class theorem on the fix:** from any state where the map represents an abstract entry list `A`, for *every* sequence of `get` / `put` / `remove` calls, each call returns what the insertion-ordered case-insensitive map returns (old value or null), the map then represents the abstract result, and the slot arrays never exceed `B >= max(initial length, 3 * threshold)` |
+
+Assumptions of `session_ok`: no `resize()` (fewer than `threshold` entries whenever a new key is put; resize needs
+`(int)(n*0.75f)` on the float model); `equalsIgnoreCase` is symmetric, transitive and consistent with `cih_spec` on
+the keys used (the `good` hypotheses: true without surrogates by `CimSpec`, false for supplementary letters, see the
+finding); `3 * threshold <= 2^20` (the model's array bound). `containsKey` is proved at bytecode level
+(`containsKey_spec`) but not part of the session. Next: discharge the `good` hypotheses for ASCII keys, then `resize`.
 
 ## Proof infrastructure
 - `Core/Tactics.v`: symbolic execution of the frame interpreter (`symex`), used for int-only methods.
