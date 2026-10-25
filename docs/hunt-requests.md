@@ -84,14 +84,16 @@ TreeMap in `harness/jdkmodel` (like HashMap) would do.
 
 ## Status (model session, updated 2026-10-25)
 
-| Request | State in the model session's working copy | On GitHub |
+Branch `thread-layer` on GitHub (first push `e8212b2`), merged into `main` once the full proof rebuild is green.
+
+| Request | State | Differential tests vs HotSpot |
 |---|---|---|
-| R1 thread layer | `Core/Threads.v`, `call_static_threads`, `harness/threads/`, `classes/threadmodel`, `harness/threads_main.ml`; differential tests: 18 thread programs × 300 inputs × 6 schedules, 0 mismatches | with the next push |
-| R2 ReentrantLock, Lock, Condition | model class (non-fair; `ReentrantLock(true)` is STUCK); runs under the thread layer (needs `Thread.currentThread`) | next push |
-| R3 atomics | AtomicInteger/Long/Boolean/Reference model classes; a regression found while answering this (`Number.<init>` STUCK after a resolution change) is fixed | next push |
-| R4 clock | nanoTime/currentTimeMillis in the thread layer: start 0, +1 ns per step, jumps to the earliest deadline when all threads wait. A clock supplied by the theorem: not yet | partly, next push |
-| R5 timers, scheduled executors | Executors fixed/single/cached + FutureTask only; Timer and ScheduledExecutorService: not yet | no |
-| R6 ConcurrentHashMap | clean-room model class (bins locked on their first node, tree bins, resize with forwarding, views, compute*/merge incl. "Recursive update"); single-thread tests 7 targets, 0 mismatches so far; thread-layer tests in progress | next push |
-| R7 Semaphore, DelayQueue | not yet | no |
-| R8 TreeSet/TreeMap | not yet (CountDownLatch: done, R1) | no |
-| R9 String.format | not yet | no |
+| R1 thread layer | `Core/Threads.v`: `call_static_threads`, `call_static_threads_at` (start clock), `harness/threads/`, `classes/threadmodel`, `harness/threads_main.ml` | 18 thread programs × 300 inputs × 6 schedules: 0 mismatches |
+| R2 ReentrantLock, Lock, Condition | model class, non-fair (`ReentrantLock(true)` is STUCK); needs the thread layer (`Thread.currentThread`) even for sequential code | in the thread corpus: 0 mismatches |
+| R3 atomics | AtomicInteger/Long/Boolean/Reference; the `Number.<init>` regression is fixed | rerun pending |
+| R4 clock | nanoTime / currentTimeMillis from the run's clock: start chosen by `call_static_threads_at`, +1 ns per step, jumps to the earliest deadline when every thread waits; `Thread.sleep(ms)` now ends only once ms have passed, so a driver makes time pass by sleeping | pending |
+| R5 timers, executors | Executors fixed/single/cached, FutureTask, `ScheduledThreadPoolExecutor` (schedule, fixed rate, fixed delay, cancel, shutdown policies; not a subclass of ThreadPoolExecutor), `Timer`/`TimerTask` | HotSpot side checked; model side pending |
+| R6 ConcurrentHashMap | model class: bins locked on their first node, tree bins, resize with forwarding nodes, views, compute*/merge incl. "Recursive update". A mapping function that changes the map and triggers a resize is STUCK (the Javadoc forbids it) | 7 single-thread targets × 300 inputs: 0 mismatches; 7 thread targets × 50 inputs × 6 schedules: 0 mismatches |
+| R7 Semaphore, DelayQueue | both model classes (fair and non-fair Semaphore incl. reducePermits from a subclass; DelayQueue with the PriorityQueue heap order) | HotSpot side checked; model side pending |
+| R8 TreeSet/TreeMap | model classes (sorted array; navigation, views, fail-fast iterators; subMap/headMap/tailMap STUCK); CountDownLatch done | pending |
+| R9 String.format | not yet | |

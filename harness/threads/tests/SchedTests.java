@@ -150,4 +150,31 @@ public class SchedTests {
         r += " " + periodicDone + " " + fa.isCancelled() + " " + fb.isCancelled() + " " + ex.awaitTermination(1, TimeUnit.SECONDS);
         return r;
     }
+
+    static final class D implements Delayed {
+        final long at; final String name;
+        D(long ms, String name) { this.at = System.nanoTime() + ms * 1000000L; this.name = name; }
+        public long getDelay(TimeUnit u) { return u.convert(at - System.nanoTime(), TimeUnit.NANOSECONDS); }
+        public int compareTo(Delayed o) { return Long.compare(at, ((D) o).at); }
+        public String toString() { return name; }
+    }
+
+    /** DelayQueue: poll before expiry, take in delay order, timed poll, peek, remove. */
+    public static String delayQueue(int n) throws Exception {
+        DelayQueue<D> q = new DelayQueue<>();
+        int rot = small(n) % 3;
+        int[] ds = { 300, 100, 200 };
+        for (int i = 0; i < 3; i++) { int d = ds[(i + rot) % 3]; q.put(new D(d, "d" + d)); }
+        D gone = new D(150, "gone");
+        q.add(gone);
+        StringBuilder b = new StringBuilder();
+        b.append(q.poll()).append(' ').append(q.peek()).append(' ').append(q.size()).append(' ').append(q.remove(gone)).append(' ');
+        b.append(q.poll(10, TimeUnit.MILLISECONDS)).append(' ');
+        Thread t = new Thread(() -> { try { b.append(q.take()).append(' '); } catch (InterruptedException e) { } });
+        t.start();
+        t.join();
+        b.append(q.take()).append(' ').append(q.take()).append(' ').append(q.size()).append(' ').append(q.poll());
+        try { q.put(null); } catch (NullPointerException e) { b.append(" NPE"); }
+        return b.toString();
+    }
 }

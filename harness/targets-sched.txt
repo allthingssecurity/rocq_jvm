@@ -5,3 +5,4 @@ classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests timerOrder 
 classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests timerPeriodic (I)Ljava/lang/String;
 classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests scheduledOrder (I)Ljava/lang/String;
 classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests scheduledPeriodic (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests delayQueue (I)Ljava/lang/String;
