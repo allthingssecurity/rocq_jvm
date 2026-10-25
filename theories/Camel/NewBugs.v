@@ -19,7 +19,7 @@ Definition bug_u : uenv := {| u_upper := ascii_upper; u_lower := ascii_lower;
   u_digit := fun _ _ => -1; u_is_whitespace := fun _ => false;
   u_is_letter := fun _ => false; u_is_digit := fun _ => false;
   u_is_upper := fun _ => false; u_is_lower := fun _ => false |}.
-Definition bug_e : jenv := {| j_u := bug_u; j_log_enabled := fun _ => false |}.
+Definition bug_e : jenv := {| j_u := bug_u; j_log_enabled := fun _ => false; j_ihash := fun l => l |}.
 Definition bug_mdl := jdk_model bug_p bug_e.
 Definition int_result (r : mresult) : option Z :=
   match r with MRValue (Some (VInt i)) _ => Some i | _ => None end.

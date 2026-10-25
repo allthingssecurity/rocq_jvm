@@ -87,8 +87,21 @@ source of java.base and checked against HotSpot by the corpora `harness/corpus3`
 - `Math` floorDiv/floorMod/addExact/subtractExact/multiplyExact/negateExact/incrementExact/decrementExact/
   absExact/toIntExact; `Integer`/`Long` bitCount, numberOfLeading/TrailingZeros, highest/lowestOneBit,
   rotateLeft/Right, sum, hashCode, signum.
-Not modelled on purpose: `Object.hashCode`/`identityHashCode` (nondeterministic), I/O, Method/Field/Constructor
-reflection, class loaders.
+- More `String` methods (`repeat`, `isBlank`, `strip*`, ASCII case conversion, `replace(CharSequence,..)`,
+  `split` (one-character fast path), `compareToIgnoreCase`, `join`), `Comparable.compareTo` of Strings and boxes,
+  `Integer`/`Long.toHexString`/`toOctalString`/`toBinaryString`, `java.lang.reflect.Array.newInstance`.
+- Methods that the JDK defines by other library code run that code's **model class as bytecode** in a frame of its
+  own (`Machine.MFrame`): `String.format`/`formatted` (`new java.util.Formatter().format(..).toString()`),
+  `String.matches`/`replaceAll`/`replaceFirst`/`split(regex)` (`java.util.regex.Pattern`/`Matcher`),
+  `String.valueOf(Object)`, `StringBuilder.append(Object)`, `Object.toString` (virtual `toString`/`hashCode`).
+- `classes/jdkmodel` (source `harness/jdkmodel/src`) are **clean-room Java model classes** compiled as a patch of
+  java.base: the collections (`ArrayList`, `HashMap`/`LinkedHashMap`/`HashSet`/`LinkedHashSet`, `TreeMap`/`TreeSet`,
+  `ArrayDeque`, `Arrays`, `Collections`, `Comparator`, iterators and views, `ConcurrentHashMap`), `Formatter`
+  (integer, character, string, boolean and hash conversions with JDK messages for malformed formats; floating
+  point and date/time conversions are STUCK) and `java.util.regex` (backtracking matcher; lookbehind, malformed
+  patterns and captures the JDK may keep from failed attempts are STUCK). A JDK method missing from a model
+  class is STUCK (never `NoSuchMethodError`). Evidence: `harness/targets-{jdkmodel,chm,tree,fmt,sort,deque,regex}.txt`.
+Not modelled on purpose: I/O, Method/Field/Constructor reflection beyond the cases above, class loaders.
 
 - Reflection (`reflect_model`, `class_member_model`): the members found, the access rules and the messages follow
   JDK 21 (`Class.getMethod0`, `Reflection.verifyMemberAccess`, `DirectMethodHandleAccessor`); invocation runs
@@ -108,16 +121,32 @@ what a run does when no VirtualMachineError occurs, which is all a program can r
   theorem proved over `tstep` says nothing about the extra (non-SC) behaviours of a racy program.
 - JDK model calls (String, StringBuilder, arraycopy, ...) are atomic steps.
 - Monitors, wait sets, notify (any waiter: the choice is a parameter of `tstep`), spurious wakeups and timeouts
-  (`ts_wakeup`), interrupts and class-initialisation blocking follow JLS 17.1–17.2 and 12.4.2. `Thread.sleep`
-  is a blocked state that may end at any step. Daemon threads, priorities and timed `join` are not modelled
-  (STUCK); the run's result is the main thread's.
+  (`ts_wakeup`), interrupts and class-initialisation blocking follow JLS 17.1–17.2 and 12.4.2. The run's result is
+  the main thread's; daemon status and priorities have no effect.
+- **Time.** `System.nanoTime`/`currentTimeMillis` read the run's clock. In the relation `tstep` the clock may advance
+  at any step by any amount (`ts_tick`). The executable runs (`trun_gen`) advance it by 1 ns per step; a timed wait
+  or sleep ends once the clock has reached its deadline (never earlier: JLS 17.10 for sleep); when no thread can
+  step, the clock jumps to the earliest deadline. With `ticks = true` (`call_static_threads_gen`), jumping to the
+  earliest deadline is also a scheduler choice at every step, so timeouts can happen while other threads run.
+  A theorem over `trun_gen false` covers only the timeout orders that rule produces; over `trun_gen true`, every
+  order of the deadlines relative to the threads' steps (time jumps go to deadlines, not to arbitrary instants).
 - `classes/threadmodel` (source `harness/threads/src`) are **clean-room Java model classes**, loaded only by the
-  machine: `java.lang.Thread` (its private natives are implemented by `Threads.v`), `ThreadLocal`,
-  `AtomicInteger/Long/Boolean/Reference` (every operation one synchronized method: atomic and totally ordered,
-  as the JDK's volatile/CAS operations are under SC; weak CAS never fails spuriously), `CountDownLatch`,
-  `ReentrantLock` and its `Condition` (built on monitors and wait/notify, non-fair). Timed waits on them are
-  STUCK. They are trusted like the java.util model classes and checked the same way (differential tests under
-  six schedulers each, `harness/targets-threads*.txt`).
+  machine: `java.lang.Thread` (its private natives are implemented by `Threads.v`; uncaught exceptions go to the
+  thread's or the default handler), `ThreadLocal`, the atomics and `LongAdder` (every operation one synchronized
+  method: atomic and totally ordered, as the JDK's volatile/CAS operations are under SC; weak CAS never fails
+  spuriously), `CountDownLatch`, `Semaphore`, `ReentrantLock` (fair and non-fair) and its `Condition`, blocking
+  queues, `ThreadPoolExecutor`, `ScheduledThreadPoolExecutor`, `Executors`, `FutureTask`, `Timer`/`TimerTask`,
+  `DelayQueue`. `harness/jdkmodel` adds `ConcurrentHashMap` (bins locked on their first node as in the JDK). They
+  are trusted like the java.util model classes and checked the same way (differential tests under six schedulers
+  each, `harness/targets-{threads*,chmthreads,sched,pool,time}.txt`).
+
+## 5c. Identity hash codes
+- `Object.hashCode`, `Object.toString` and `System.identityHashCode` of an object use `j_ihash` of the
+  environment (`jenv`), a function of the heap address, because the JVMS leaves identity hash codes unspecified.
+  A theorem fixes it or quantifies over it: a property proved for every `j_ihash` holds on every JVM, a bug shown
+  for one `j_ihash` is a behaviour some JVM may have. The differential drivers use a fixed mix of the address, so
+  output that depends on identity hash values is not comparable with HotSpot; the java.util models stay STUCK where
+  an iteration order would depend on them (HashMap / ConcurrentHashMap tree-bin tie-breaks).
 
 ## 6. Test drivers and assumptions stated in theorems
 - `harness/camel/wal-*/WalScenario.java` and `harness/camel/cim/.../CimScenario.java` are our test drivers for the

@@ -5,7 +5,7 @@
  */
 package java.util.concurrent;
 
-public class FutureTask<V> implements Runnable, Future<V> {
+public class FutureTask<V> implements RunnableFuture<V> {
     private static final int NEW = 0, NORMAL = 2, EXCEPTIONAL = 3, CANCELLED = 4, INTERRUPTED = 6;
     private int state = NEW;
     private Callable<V> callable;
@@ -42,6 +42,36 @@ public class FutureTask<V> implements Runnable, Future<V> {
         done();
     }
     protected void done() { }
+
+    /** Javadoc: sets the result unless the future has already completed or been cancelled. */
+    protected void set(V v) {
+        synchronized (this) {
+            if (state != NEW) return;
+            outcome = v; state = NORMAL; callable = null; notifyAll();
+        }
+        done();
+    }
+    protected void setException(Throwable t) {
+        synchronized (this) {
+            if (state != NEW) return;
+            outcome = t; state = EXCEPTIONAL; callable = null; notifyAll();
+        }
+        done();
+    }
+    /** Javadoc: runs the computation without setting its result, leaving the future in its
+     *  initial state; false if it did not run or threw (the exception is then set). */
+    protected boolean runAndReset() {
+        Callable<V> c;
+        synchronized (this) {
+            if (state != NEW || runner != null) return false;
+            runner = Thread.currentThread();
+            c = callable;
+        }
+        boolean ran = false;
+        try { c.call(); ran = true; }
+        catch (Throwable t) { synchronized (this) { runner = null; } setException(t); return false; }
+        synchronized (this) { runner = null; return ran && state == NEW; }
+    }
 
     public synchronized boolean cancel(boolean mayInterruptIfRunning) {
         if (state != NEW) return false;

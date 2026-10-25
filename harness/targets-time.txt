@@ -1,0 +1,3 @@
+classes/thread-tests:classes/threadmodel:classes/jdkmodel TimeTests sleepVsTimedWait (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel TimeTests deadlineOrder (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel TimeTests mixed (I)Ljava/lang/String;

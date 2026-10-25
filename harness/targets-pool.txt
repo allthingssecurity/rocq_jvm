@@ -1,0 +1,9 @@
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests rejection (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests hooks (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests cached (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests fixedShutdownNow (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests config (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests scheduledAsPool (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests queues (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests fairLock (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel PoolTests uncaught (I)Ljava/lang/String; fresh

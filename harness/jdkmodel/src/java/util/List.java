@@ -1,6 +1,6 @@
 /*
  * rocq-jvm model of java.util.List (clean-room, Apache-2.0).
- * List.of/copyOf, sort and spliterator are not modelled.
+ * List.of/copyOf and spliterator are not modelled.
  */
 package java.util;
 
@@ -32,6 +32,18 @@ public interface List<E> extends Collection<E> {
     ListIterator<E> listIterator();
     ListIterator<E> listIterator(int index);
     List<E> subList(int fromIndex, int toIndex);
+
+    /** Javadoc (List.sort): sorts toArray() (stable), then writes it back through listIterator().set. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    default void sort(Comparator<? super E> c) {
+        Object[] a = this.toArray();
+        Arrays.sort(a, (Comparator) c);
+        ListIterator<E> i = this.listIterator();
+        for (Object e : a) {
+            i.next();
+            i.set((E) e);
+        }
+    }
 
     /** Javadoc (List.replaceAll): replaces each element through listIterator().set. */
     default void replaceAll(UnaryOperator<E> operator) {

@@ -987,4 +987,67 @@ public class Collections {
         public V computeIfAbsent(K key, java.util.function.Function<? super K, ? extends V> f) { synchronized (mutex) { return m.computeIfAbsent(key, f); } }
         public V merge(K key, V value, java.util.function.BiFunction<? super V, ? super V, ? extends V> f) { synchronized (mutex) { return m.merge(key, value, f); } }
     }
+
+    // ---- orderings (Javadoc of reverseOrder and Comparator.naturalOrder / nullsFirst / nullsLast) ----
+
+    static final class NaturalOrder implements Comparator<Comparable<Object>>, java.io.Serializable {
+        static final NaturalOrder INSTANCE = new NaturalOrder();
+        public int compare(Comparable<Object> c1, Comparable<Object> c2) { return c1.compareTo(c2); }
+        public Comparator<Comparable<Object>> reversed() { return Collections.reverseOrder(); }
+    }
+
+    private static final class ReverseComparator implements Comparator<Comparable<Object>>, java.io.Serializable {
+        static final ReverseComparator REVERSE_ORDER = new ReverseComparator();
+        public int compare(Comparable<Object> c1, Comparable<Object> c2) { return c2.compareTo(c1); }
+        @SuppressWarnings("unchecked")
+        public Comparator<Comparable<Object>> reversed() { return (Comparator<Comparable<Object>>) (Comparator<?>) NaturalOrder.INSTANCE; }
+    }
+
+    private static final class ReverseComparator2<T> implements Comparator<T>, java.io.Serializable {
+        final Comparator<T> cmp;
+        ReverseComparator2(Comparator<T> cmp) { this.cmp = cmp; }
+        public int compare(T t1, T t2) { return cmp.compare(t2, t1); }
+        public boolean equals(Object o) { return (o == this) || (o instanceof ReverseComparator2 && cmp.equals(((ReverseComparator2<?>) o).cmp)); }
+        public int hashCode() { return cmp.hashCode() ^ Integer.MIN_VALUE; }
+        public Comparator<T> reversed() { return cmp; }
+    }
+
+    static final class NullComparator<T> implements Comparator<T>, java.io.Serializable {
+        private final boolean nullFirst;
+        private final Comparator<T> real;
+        @SuppressWarnings("unchecked")
+        NullComparator(boolean nullFirst, Comparator<? super T> real) { this.nullFirst = nullFirst; this.real = (Comparator<T>) real; }
+        public int compare(T a, T b) {
+            if (a == null) return (b == null) ? 0 : (nullFirst ? -1 : 1);
+            else if (b == null) return nullFirst ? 1 : -1;
+            else return (real == null) ? 0 : real.compare(a, b);
+        }
+        public Comparator<T> thenComparing(Comparator<? super T> other) {
+            if (other == null) throw new NullPointerException();
+            return new NullComparator<>(nullFirst, real == null ? other : real.thenComparing(other));
+        }
+        public Comparator<T> reversed() { return new NullComparator<>(!nullFirst, real == null ? null : real.reversed()); }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static <T> Comparator<T> reverseOrder() {
+        return (Comparator<T>) ReverseComparator.REVERSE_ORDER;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static <T> Comparator<T> reverseOrder(Comparator<T> cmp) {
+        if (cmp == null) return (Comparator<T>) ReverseComparator.REVERSE_ORDER;
+        else if (cmp == ReverseComparator.REVERSE_ORDER) return (Comparator<T>) NaturalOrder.INSTANCE;
+        else if (cmp == (Comparator<?>) NaturalOrder.INSTANCE) return (Comparator<T>) ReverseComparator.REVERSE_ORDER;
+        else if (cmp instanceof ReverseComparator2) return ((ReverseComparator2<T>) cmp).cmp;
+        else return new ReverseComparator2<>(cmp);
+    }
+
+    public static <T extends Comparable<? super T>> void sort(List<T> list) {
+        list.sort(null);
+    }
+
+    public static <T> void sort(List<T> list, Comparator<? super T> c) {
+        list.sort(c);
+    }
 }

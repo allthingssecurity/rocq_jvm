@@ -42,6 +42,18 @@ Example zs1 : z_to_string (-9223372036854775808) = "-9223372036854775808"%string
 Example zs2 : z_of_string "-2147483648" = -2147483648. Proof. reflexivity. Qed.
 
 (** The thread layer, for the thread tests (harness/threads_main.ml). *)
+(** [clock0]: the start time; [ticks]: the scheduler may also let time pass (Threads.trun_gen). *)
+Definition call_static_args_threads_gen (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (clock0 : Z) (ticks : bool)
+           (cls name desc : string) (xs : list jarg) : tresult :=
+  let s0 := {| ms_heap := fun _ => None; ms_next := 1; ms_statics := nil; ms_inited := nil;
+               ms_locks := nil; ms_frames := nil |} in
+  let (vs, s1) := alloc_args s0 xs in
+  match entry_state cls name desc vs with
+  | Some s => trun_gen ticks p mdl sch fuel O (set_clock (tm_of {| ms_heap := ms_heap s1; ms_next := ms_next s1; ms_statics := nil;
+                                            ms_inited := nil; ms_locks := nil; ms_frames := ms_frames s |}) clock0)
+  | None => TRStuckRun "entry: bad descriptor or arguments"
+  end.
+
 Definition call_static_args_threads (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (cls name desc : string)
            (xs : list jarg) : tresult :=
   let s0 := {| ms_heap := fun _ => None; ms_next := 1; ms_statics := nil; ms_inited := nil;
@@ -62,4 +74,4 @@ Extraction "jvm.ml" parse_class load_method find_method invoke_static parse_mdes
   z_of_string z_to_string INT_MIN
   load_program call_static base_model exn_class
   jdk_model call_static_args str_value Float.canon32 Float.canon64
-  call_static_args_threads tm_ms.
+  call_static_args_threads call_static_args_threads_gen tm_ms.

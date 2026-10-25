@@ -894,7 +894,9 @@ public class HashMap<K, V> extends AbstractMap<K, V> implements Map<K, V>, Clone
             int d = a.getClass().getName().compareTo(b.getClass().getName());
             if (d != 0) return d;
         }
-        return System.identityHashCode(a) <= System.identityHashCode(b) ? -1 : 1;
+        // HotSpot's identity hash codes decide here; the machine's are a parameter (jenv.j_ihash), so
+        // an order that depends on them is not claimed
+        throw ModelStuck.unsupported("HashMap tree bin: order by identity hash code");
     }
 
     static final class TreeNode<K, V> extends Node<K, V> {

@@ -86,6 +86,69 @@ public class Arrays {
         return h;
     }
 
+    // ---- sort: a stable merge sort (the JDK's TimSort is stable too, so the result is the same;
+    //      only the sequence of compare calls differs) ----
+
+    public static void sort(Object[] a) {
+        sortRange(a, 0, a.length, null);
+    }
+
+    public static void sort(Object[] a, int fromIndex, int toIndex) {
+        rangeCheck(a.length, fromIndex, toIndex);
+        sortRange(a, fromIndex, toIndex, null);
+    }
+
+    public static <T> void sort(T[] a, Comparator<? super T> c) {
+        sortRange(a, 0, a.length, c);
+    }
+
+    public static <T> void sort(T[] a, int fromIndex, int toIndex, Comparator<? super T> c) {
+        rangeCheck(a.length, fromIndex, toIndex);
+        sortRange(a, fromIndex, toIndex, c);
+    }
+
+    static void rangeCheck(int arrayLength, int fromIndex, int toIndex) {
+        if (fromIndex > toIndex) throw new IllegalArgumentException("fromIndex(" + fromIndex + ") > toIndex(" + toIndex + ")");
+        if (fromIndex < 0) throw new ArrayIndexOutOfBoundsException("Array index out of range: " + fromIndex);
+        if (toIndex > arrayLength) throw new ArrayIndexOutOfBoundsException("Array index out of range: " + toIndex);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static int cmp(Comparator c, Object x, Object y) {
+        if (c == null && y != null && TreeMap.isJdkComparableX(x) && x.getClass() != y.getClass()) {
+            // the bridge compareTo(Object) of String and the boxes casts its argument first
+            if (!TreeMap.isJdkComparableX(y)) throw ModelStuck.unsupported("Arrays.sort: ClassCastException message for a user class");
+            String a = y.getClass().getName(), b = x.getClass().getName();
+            throw new ClassCastException("class " + a + " cannot be cast to class " + b + " (" + a + " and " + b
+                + " are in module java.base of loader 'bootstrap')");
+        }
+        return (c == null) ? ((Comparable) x).compareTo(y) : c.compare(x, y);
+    }
+
+    @SuppressWarnings("rawtypes")
+    static void sortRange(Object[] a, int lo, int hi, Comparator c) {
+        int n = hi - lo;
+        if (n < 2) return;
+        Object[] tmp = new Object[n];
+        mergeSort(a, tmp, lo, hi, c);
+    }
+
+    @SuppressWarnings("rawtypes")
+    private static void mergeSort(Object[] a, Object[] tmp, int lo, int hi, Comparator c) {
+        if (hi - lo < 2) return;
+        int mid = (lo + hi) >>> 1;
+        mergeSort(a, tmp, lo, mid, c);
+        mergeSort(a, tmp, mid, hi, c);
+        int i = lo, j = mid, k = 0;
+        while (i < mid && j < hi) {
+            if (cmp(c, a[j], a[i]) < 0) tmp[k++] = a[j++];
+            else tmp[k++] = a[i++];
+        }
+        while (i < mid) tmp[k++] = a[i++];
+        while (j < hi) tmp[k++] = a[j++];
+        for (int m = 0; m < k; m++) a[lo + m] = tmp[m];
+    }
+
     /** The list view (java.util.Arrays$ArrayList). */
     private static class ArrayList<E> extends AbstractList<E> implements RandomAccess, java.io.Serializable {
         private final E[] a;
@@ -157,8 +220,9 @@ public class Arrays {
             for (int i = 0; i < arr.length; i++) arr[i] = operator.apply(arr[i]);
         }
 
+        /** Javadoc: sorts the backing array in place (stable). */
         public void sort(Comparator<? super E> c) {
-            throw ModelStuck.unsupported("Arrays.asList(..).sort");
+            sortRange(a, 0, a.length, c);
         }
 
         public Iterator<E> iterator() {

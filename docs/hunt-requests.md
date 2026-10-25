@@ -96,4 +96,77 @@ On GitHub `main` since `8a1d67c` (full proof rebuild green, no axioms).
 | R6 ConcurrentHashMap | model class: bins locked on their first node, tree bins, resize with forwarding nodes, views, compute*/merge incl. "Recursive update". A mapping function that changes the map and triggers a resize is STUCK (the Javadoc forbids it) | 7 single-thread targets × 300 inputs: 0 mismatches; 7 thread targets × 50 inputs × 6 schedules: 0 mismatches |
 | R7 Semaphore, DelayQueue | both model classes (fair and non-fair Semaphore incl. reducePermits from a subclass; DelayQueue with the PriorityQueue heap order) | SchedTests semaphore and DelayQueue targets × 30 × 6 schedules: 0 mismatches |
 | R8 TreeSet/TreeMap | model classes (sorted array; navigation, views, fail-fast iterators; subMap/headMap/tailMap STUCK); CountDownLatch done | TreeOps 3 targets × 300: 0 mismatches |
-| R9 String.format | not yet | |
+| R9 String.format | `String.format` / `formatted` through a `java.util.Formatter` model: general, character, integral and text conversions, all flags, indexing, the JDK's exceptions and messages; floating-point and date/time conversions are STUCK | `FmtOps` fuzzer 300 + common 300: 0 mismatches |
+
+## R10+. Requests from the r82 hunt (thread layer e8212b2, 2026-10-25)
+
+Written by the r82 hunt session. Hunt files: `theories/CamelHunt/R82*.v`, `theories/CamelHunt/Classes/H82*`,
+`harness/camel/hunt/` (drivers `src82/`, explorer `explore82.ml`, `jdkextra/`), `classes/hunt82-*`. Nothing in Core,
+Jdk, Loader, Concurrency or the model classes was changed.
+
+### R10. Timeouts: earliest deadline first, and timeouts while other threads run
+
+`trun` ends a timed wait only when no thread can step, and then wakes the *first* timed waiter in thread order
+(`timed_waiter`), before it looks at sleepers (`sleep_deadline`), whatever the deadlines. Two consequences met in
+the hunt:
+- A `Thread.sleep(500)` wakes at 1000 ms when another thread is in a timed wait until 1000 ms: the clock jumps to
+  1000 ms first and the sleeper only becomes runnable then (`HuntR82TimeoutMap.getExpired`: the purge task of
+  `DefaultTimeoutMap`, a timed wait in the ScheduledThreadPoolExecutor model, always ran before the `get` at 500 ms).
+  With two timed waiters, the one with the lower thread index wins even with the later deadline.
+- A timed wait never ends while another thread can step, so a timer task that fires during other activity is never
+  explored. Drivers work around it by making the racing thread sleep to a deadline just before the timer's (then
+  both are runnable when the clock jumps), see `HuntR82Policy.timerStraggler(.., early)`.
+Request: when nothing can step, jump to the earliest deadline over sleeps and timed waits (ties: thread order); and,
+as a scheduler choice, let a thread whose deadline has passed (the clock advances 1 ns per step) time out while
+others can step, so that a schedule can interleave a timeout with running threads. The refutations of this round do
+not depend on it (each is a concrete schedule); the "proved over bounded schedules" claims do (they cover only the
+timeout orders the current rule produces).
+
+### R11. Comparator.comparing, List.sort / ArrayList.sort
+
+`DefaultTimeoutMap.purge` sorts the expired entries (`expired.sort(comparing(TimeoutMapEntry::getExpireTime))`).
+`Comparator.comparing` has no model (`STUCK no model for java/util/Comparator.comparing`) and the jdkmodel
+`ArrayList.sort` throws ModelStuck by design. Every run in which the purge evicts an entry is STUCK, so the
+eviction/put/remove races of DefaultTimeoutMap could not be explored. Needed: the static and default methods of
+`java.util.Comparator` (comparing, comparingInt/Long, thenComparing, reversed, naturalOrder) and a stable `List.sort`
+(the JDK's is a stable merge sort; for the small lists of these drivers any stable sort gives the same order).
+
+### R12. Identity hash codes
+
+`Object.hashCode()` of a user object is STUCK (model bound). `ThrottlingInflightRoutePolicy` keeps the consumers it
+suspended in `ConcurrentHashMap.newKeySet()`, so the first suspension was STUCK until the driver's consumer overrode
+`hashCode` (constant) and `equals` (identity). A model choice (e.g. allocation address, fixed per object) would let
+drivers use plain objects as keys; results that depend on the bin order of identity hashes would still need care.
+
+### R13. ArrayDeque / Deque / Queue (provided by the hunt, please adopt)
+
+The r81 fix of ThrottlingExceptionRoutePolicy uses `ArrayDeque`. The hunt wrote clean-room models
+`harness/camel/hunt/jdkextra/src/java/util/{Queue,Deque,ArrayDeque}.java` (built into `classes/hunt82-jdkextra`
+with `--patch-module java.base`) and difftested them: `DequeTests.ops` (random sequences of every Deque method,
+iterators and descending iterators with remove) and `DequeTests.nulls`, 2 x 10,000 inputs x 2 seeds, 0 mismatches
+(`MODE=machine harness/difftest.sh`, results in `harness/results/2026-10-25.tsv`). The first version had a wrong
+`descendingIterator().remove()`; the difftest found it (seed 185). Not modelled: fail-fast
+ConcurrentModificationException of the iterators, clone, spliterator/streams. Please move them to `harness/jdkmodel`
+if they fit its conventions.
+
+### R14. Small gaps met on the way
+
+- `java.util.regex.Pattern` (any use): `ThreadHelper`'s `<clinit>` compiles a pattern, so `ResequencerEngine.start()`
+  (thread name of its Timer) is STUCK; the driver sets the engine's timer field by reflection instead.
+- `String.format`: still R9; `ThrottlingExceptionRoutePolicy.dumpState` runs whenever the policy was initialised
+  (`doInit` installs the state logger), so the drivers do not init the policy.
+- `ArrayBlockingQueue` and `LongAdder` (`PooledObjectFactorySupport`, so `PooledExchangeFactory`), `DelayQueue` (R7,
+  `TotalRequestsThrottler`).
+- Not a model gap, a note for schedule search: the JDK's spin-waits (for example `ConcurrentHashMap.initTable`,
+  which yields while another thread initialises the table) do not terminate under a strictly unfair schedule. The
+  r82 explorer gives each thread a time slice of 5,000 steps when others can step.
+
+### Status of R10–R14 (model session, 2026-10-25)
+
+| Request | State | Differential tests vs HotSpot |
+|---|---|---|
+| R10 timeouts | `trun_gen`: a timed wait or sleep ends once the clock reaches its deadline, also while other threads run; when nothing can step the clock jumps to the **earliest** deadline over sleeps and timed waits (the scheduler then chooses among the threads that can step). `call_static_threads_gen p mdl sch fuel clock0 true ...` adds "jump to the earliest deadline" as a scheduler choice at every step (the last choice index), so timeouts can interleave with running threads. `call_static_threads` keeps ticks off. Claims made over bounded schedules with the old rule should be re-run. | `TimeTests` (sleep vs timed wait, deadline order, mixed timed operations) × 20 × 6 schedules: 0 mismatches |
+| R11 Comparator, sort | `java.util.Comparator` model (comparing, comparingInt/Long, thenComparing*, reversed, naturalOrder, reverseOrder, nullsFirst/Last; the Double variants are STUCK); stable merge sort for `List.sort`, `ArrayList.sort` (CME when the comparator changes the list), `Arrays.asList(..).sort`, `Collections.sort`, `Arrays.sort(Object[])` and ranges; `Collections.reverseOrder` | `SortOps.sorts` × 300: 0 mismatches |
+| R12 identity hash codes | `jenv.j_ihash : Z -> Z` (identity hash of a heap address, chosen by the theorem); `Object.hashCode`, `Object.toString` (class@hex), `System.identityHashCode`. Tree-bin orders that depend on identity hashes stay STUCK (TRUST.md 5c). Also `Integer`/`Long.toHexString`, `toOctalString`, `toBinaryString`, `java.lang.reflect.Array.newInstance` (so `toArray(new T[0])` works) | `SortOps.identity` × 300 (consistency only): 0 mismatches |
+| R13 ArrayDeque/Deque/Queue | adopted into `harness/jdkmodel` (with `AbstractQueue`); the hunt's `DequeTests` moved to `harness/jdkmodel/tests` | `DequeTests` 2 × 300: 0 mismatches |
+| R14 small gaps | `LongAdder`, `ArrayBlockingQueue`, `LinkedBlockingQueue`, `SynchronousQueue`, `DelayQueue`, `ThreadPoolExecutor` (+ policies, hooks), `ScheduledThreadPoolExecutor extends ThreadPoolExecutor`, fair `ReentrantLock`, uncaught-exception handlers, `String.format` (R9). `java.util.regex` (`Pattern`, `Matcher`: groups, named groups, classes, greedy/lazy/possessive quantifiers, anchors, back references, lookahead, inline flags, replace, split), and `String.matches`, `replaceAll`, `replaceFirst`, `split` run on it. STUCK: lookbehind, malformed patterns (PatternSyntaxException messages), captures the JDK may keep from failed attempts | `PoolTests` 9 × 20 × 6 schedules; `RegexOps` 2 × 300 (22 no-claim); `StrRegex` 2 × 300: 0 mismatches |

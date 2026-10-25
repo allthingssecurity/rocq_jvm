@@ -11,7 +11,7 @@
  * - capacity: a list made by new ArrayList() gets capacity max(10, needed) on its first growth;
  *   otherwise growth is to max(needed, old + old/2).  The capacity is observable only through
  *   ensureCapacity's modCount increment.
- * subList, sort, spliterator, clone and toArray(T[]) with a too-small array are not modelled.
+ * subList, spliterator, clone and toArray(T[]) with a too-small array are not modelled.
  */
 package java.util;
 
@@ -423,8 +423,12 @@ public class ArrayList<E> extends AbstractList<E> implements List<E>, RandomAcce
         modCount++;
     }
 
+    /** Javadoc: a stable sort of the elements; a modification by the comparator is a CME. */
     public void sort(Comparator<? super E> c) {
-        throw ModelStuck.unsupported("ArrayList.sort");
+        int expectedModCount = modCount;
+        Arrays.sortRange(elementData, 0, size, c);
+        if (modCount != expectedModCount) throw new ConcurrentModificationException();
+        modCount++;
     }
 
     public List<E> subList(int fromIndex, int toIndex) {

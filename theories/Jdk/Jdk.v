@@ -22,6 +22,8 @@ Open Scope Z_scope.
 Record jenv := {
   j_u : uenv;
   j_log_enabled : string -> bool;   (** "isDebugEnabled" etc. of slf4j loggers *)
+  j_ihash : Z -> Z;                 (** identity hash code of the object at a heap address (unspecified
+                                        by the JVMS: a parameter, as the Unicode tables) *)
 }.
 
 (** ** Helpers *)
@@ -274,7 +276,7 @@ Definition string_model2 (e : jenv) (name desc : string) (this : value) (a : uni
             let limit := match lim with [VInt z] => z | _ => 0 end in
             match split_char r with
             | Some ch => do_split s this a ch limit
-            | None => MStuckModel "split: a regular expression (only the one-character fast path is modelled)"
+            | None => MNoModel (* a regular expression: run on the java.util.regex model (string_static) *)
             end
         | _, _ => MStuckModel "split"
         end
@@ -466,6 +468,57 @@ Definition model_code (vs : list value) (pre body post : list instr) (wrap : boo
 Definition string_static (name desc : string) (args : list value) (s : mstate) : model_result :=
   let key := name ++ desc in
   if String.eqb key "join(Ljava/lang/CharSequence;[Ljava/lang/CharSequence;)Ljava/lang/String;" then string_join s args else
+  (* String.format(fmt, args) and fmt.formatted(args): new java.util.Formatter().format(fmt, args).toString(),
+     run as bytecode on the model class harness/jdkmodel/src/java/util/Formatter.java *)
+  if String.eqb key "format(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;"
+     || String.eqb key "formatted([Ljava/lang/Object;)Ljava/lang/String;" then
+    match args with
+    | [f; a] =>
+        let fm := fun n d => {| mr_class := "java/util/Formatter"; mr_name := n; mr_desc := d; mr_interface := false |} in
+        MFrame None (model_code [f; a] nil
+          [New "java/util/Formatter"; Dup; Invoke InvSpecial (fm "<init>" "()V");
+           Load KA 0; Load KA 1;
+           Invoke InvVirtual (fm "format" "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/util/Formatter;");
+           Invoke InvVirtual (fm "toString" "()Ljava/lang/String;")]
+          [Return (Some KA)] false) [f; a] (Some (TRef "java/lang/String")) s
+    | _ => MStuckModel "format args"
+    end else
+  (* regular expressions, as the JDK defines them: s.matches(r) = Pattern.matches(r, s),
+     s.replaceAll(r, x) = Pattern.compile(r).matcher(s).replaceAll(x) (and replaceFirst),
+     s.split(r, n) = Pattern.compile(r).split(s, n) (the one-character fast path is modelled
+     directly in string_model2); run as bytecode on harness/jdkmodel/src/java/util/regex *)
+  let pm := fun n d => {| mr_class := "java/util/regex/Pattern"; mr_name := n; mr_desc := d; mr_interface := false |} in
+  let mm := fun n d => {| mr_class := "java/util/regex/Matcher"; mr_name := n; mr_desc := d; mr_interface := false |} in
+  let compile := Invoke InvStatic (pm "compile" "(Ljava/lang/String;)Ljava/util/regex/Pattern;") in
+  if String.eqb key "matches(Ljava/lang/String;)Z" then
+    match args with
+    | [this; r] =>
+        MFrame None (model_code [this; r] nil
+          [Load KA 1; Load KA 0; Invoke InvStatic (pm "matches" "(Ljava/lang/String;Ljava/lang/CharSequence;)Z")]
+          [Return (Some KI)] false) [this; r] (Some TBool) s
+    | _ => MStuckModel "matches args"
+    end else
+  if String.eqb key "replaceAll(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"
+     || String.eqb key "replaceFirst(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;" then
+    match args with
+    | [this; r; x] =>
+        MFrame None (model_code [this; r; x] nil
+          [Load KA 1; compile; Load KA 0;
+           Invoke InvVirtual (pm "matcher" "(Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;");
+           Load KA 2; Invoke InvVirtual (mm name "(Ljava/lang/String;)Ljava/lang/String;")]
+          [Return (Some KA)] false) [this; r; x] (Some (TRef "java/lang/String")) s
+    | _ => MStuckModel "replaceAll args"
+    end else
+  if String.eqb key "split(Ljava/lang/String;)[Ljava/lang/String;" || String.eqb key "split(Ljava/lang/String;I)[Ljava/lang/String;" then
+    match args with
+    | this :: r :: lim =>
+        let ld := match lim with [VInt _] => Load KI 2 | _ => Iconst 0 end in
+        MFrame None (model_code args nil
+          [Load KA 1; compile; Load KA 0; ld;
+           Invoke InvVirtual (pm "split" "(Ljava/lang/CharSequence;I)[Ljava/lang/String;")]
+          [Return (Some KA)] false) args (Some (TArr (TRef "java/lang/String"))) s
+    | _ => MStuckModel "split args"
+    end else
   if String.eqb key "valueOf(I)Ljava/lang/String;" then
     match args with [VInt z] => ret_new s (OStr (z_units z)) | _ => MStuckModel "valueOf" end
   else if String.eqb key "valueOf(J)Ljava/lang/String;" then
@@ -644,16 +697,33 @@ Definition exact32 (s : mstate) (z : Z) : model_result :=
 Definition exact64 (s : mstate) (z : Z) : model_result :=
   if ((z <? LONG_MIN) || (LONG_MAX <? z))%Z then MThrow ARITH else MOk (Some (VLong z)) s.
 
+(** The digits of [v] read as an unsigned [bits]-bit number in radix 2^[sh] (lower case). *)
+Fixpoint radix_digits (fuel : nat) (sh v : Z) (acc : list Z) : list Z :=
+  match fuel with
+  | O => acc
+  | S f => let d := Z.land v (2 ^ sh - 1) in
+           let c := if d <? 10 then 48 + d else 87 + d in
+           let v' := Z.shiftr v sh in
+           if v' =? 0 then c :: acc else radix_digits f sh v' (c :: acc)
+  end.
+Definition unsigned_units (sh bits v : Z) : list Z := radix_digits (Z.to_nat bits) sh (v mod 2 ^ bits) nil.
+
 Definition num_model1 (e : jenv) (key : string) (args : list value) (s : mstate) : model_result :=
   match args with
 
   | [VInt a] =>
     if String.eqb key "java/lang/Integer.toString(I)Ljava/lang/String;" then ret_new s (OStr (z_units a))
+    else if String.eqb key "java/lang/Integer.toHexString(I)Ljava/lang/String;" then ret_new s (OStr (unsigned_units 4 32 a))
+    else if String.eqb key "java/lang/Integer.toOctalString(I)Ljava/lang/String;" then ret_new s (OStr (unsigned_units 3 32 a))
+    else if String.eqb key "java/lang/Integer.toBinaryString(I)Ljava/lang/String;" then ret_new s (OStr (unsigned_units 1 32 a))
     else if String.eqb key "java/lang/Math.abs(I)I" then ret_int s (wrap32 (Z.abs a))
     else if String.eqb key "java/lang/Integer.signum(I)I" then ret_int s (Z.sgn a)
     else MNoModel
   | [VLong a] =>
     if String.eqb key "java/lang/Long.toString(J)Ljava/lang/String;" then ret_new s (OStr (z_units a))
+    else if String.eqb key "java/lang/Long.toHexString(J)Ljava/lang/String;" then ret_new s (OStr (unsigned_units 4 64 a))
+    else if String.eqb key "java/lang/Long.toOctalString(J)Ljava/lang/String;" then ret_new s (OStr (unsigned_units 3 64 a))
+    else if String.eqb key "java/lang/Long.toBinaryString(J)Ljava/lang/String;" then ret_new s (OStr (unsigned_units 1 64 a))
     else if String.eqb key "java/lang/Math.abs(J)J" then MOk (Some (VLong (wrap64 (Z.abs a)))) s
     else MNoModel
   | [VInt a; VInt b] =>
@@ -1749,10 +1819,28 @@ Definition sync_frame_holds (s : mstate) (l : Z) : bool :=
      else match f_locals (cf_frame f) with VRef t :: _ => (t =? l)%Z | _ => false end)) (ms_frames s).
 
 (** ** java.lang.Object (methods reached on objects of loaded classes) and clone of arrays *)
-Definition object_model (name desc : string) (args : list value) (s : mstate) : model_result :=
+Definition object_model (e : jenv) (name desc : string) (args : list value) (s : mstate) : model_result :=
   match args with
   | this :: rest =>
-    if String.eqb name "equals" && String.eqb desc "(Ljava/lang/Object;)Z" then
+    if String.eqb name "hashCode" && String.eqb desc "()I" then
+      match this with VRef l => ret_int s (j_ihash e l) | _ => MStuckModel "hashCode" end
+    else if String.eqb name "toString" && String.eqb desc "()Ljava/lang/String;" then
+      (* getClass().getName() + "@" + Integer.toHexString(hashCode()), hashCode called virtually *)
+      let sbm := fun n d => {| mr_class := "java/lang/StringBuilder"; mr_name := n; mr_desc := d; mr_interface := false |} in
+      MFrame None (model_code [this] nil
+        [New "java/lang/StringBuilder"; Dup; Invoke InvSpecial (sbm "<init>" "()V");
+         Load KA 0;
+         Invoke InvVirtual {| mr_class := "java/lang/Object"; mr_name := "getClass"; mr_desc := "()Ljava/lang/Class;"; mr_interface := false |};
+         Invoke InvVirtual {| mr_class := "java/lang/Class"; mr_name := "getName"; mr_desc := "()Ljava/lang/String;"; mr_interface := false |};
+         Invoke InvVirtual (sbm "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;");
+         Iconst 64; Invoke InvVirtual (sbm "append" "(C)Ljava/lang/StringBuilder;");
+         Load KA 0;
+         Invoke InvVirtual {| mr_class := "java/lang/Object"; mr_name := "hashCode"; mr_desc := "()I"; mr_interface := false |};
+         Invoke InvStatic {| mr_class := "java/lang/Integer"; mr_name := "toHexString"; mr_desc := "(I)Ljava/lang/String;"; mr_interface := false |};
+         Invoke InvVirtual (sbm "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;");
+         Invoke InvVirtual (sbm "toString" "()Ljava/lang/String;")]
+        [Return (Some KA)] false) [this] (Some (TRef "java/lang/String")) s
+    else if String.eqb name "equals" && String.eqb desc "(Ljava/lang/Object;)Z" then
       match rest with [v] => ret_bool s (ref_eq this v) | _ => MStuckModel "equals" end
     else if String.eqb name "getClass" && String.eqb desc "()Ljava/lang/Class;" then
       match this with
@@ -1912,11 +2000,11 @@ Definition jdk_model (p : program) (e : jenv) : model :=
       end
     else if String.eqb cls "java/lang/Object" then
       if String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
-      else object_model name desc args s
+      else object_model e name desc args s
     else if String.eqb cls "java/lang/String" then
       match string_model e name desc args s with
       | MNoModel => match string_static name desc args s with
-                    | MNoModel => object_model name desc args s
+                    | MNoModel => object_model e name desc args s
                     | r => r
                     end
       | r => r
@@ -1928,11 +2016,32 @@ Definition jdk_model (p : program) (e : jenv) : model :=
     else if String.eqb cls "java/lang/Character" then char_model e name desc args s
     else if String.eqb cls "java/lang/Integer" || String.eqb cls "java/lang/Long" || String.eqb cls "java/lang/Math" then
       num_model e cls name desc args s
+    (* java.lang.reflect.Array.newInstance(Class, int): a new array of that component type *)
+    else if String.eqb cls "java/lang/reflect/Array" && String.eqb name "newInstance"
+            && String.eqb desc "(Ljava/lang/Class;I)Ljava/lang/Object;" then
+      match args with
+      | [VNull; _] => MThrow NPE
+      | [VRef c; VInt n] =>
+          match ms_heap s c with
+          | Some (OCls cn) =>
+              let t := if prefix "[" cn || Nat.eqb (String.length cn) 1 then field_type cn else Some (TRef cn) in
+              match t with
+              | Some et => if n <? 0 then throw_with_msg s "java/lang/NegativeArraySizeException" (z_units n)
+                           else if MAX_ARRAY <? n then MStuckModel "Array.newInstance: beyond the model bound"
+                           else ret_new s (OArr et (repeat (default_of et) (Z.to_nat n)))
+              | None => MThrow "java/lang/IllegalArgumentException"
+              end
+          | _ => MStuckModel "Array.newInstance: not a Class"
+          end
+      | _ => MStuckModel "Array.newInstance args"
+      end
     else if String.eqb cls "java/util/Objects" then objects_model name desc args s
     else if String.eqb cls "java/lang/System" && String.eqb name "arraycopy" then arraycopy p args s
+    else if String.eqb cls "java/lang/System" && String.eqb name "identityHashCode" && String.eqb desc "(Ljava/lang/Object;)I" then
+      match args with [VNull] => ret_int s 0 | [VRef l] => ret_int s (j_ihash e l) | _ => MStuckModel "identityHashCode" end
     else if String.eqb cls "java/util/Arrays" then arrays_model p name desc args s
     else if String.eqb cls "java/lang/Enum" then enum_model name desc args s
-    else if prefix "[" cls then object_model name desc args s
+    else if prefix "[" cls then object_model e name desc args s
     else if prefix "org/slf4j/" cls then slf4j_model e cls name desc args s
     else if String.eqb cls "java/lang/Class" then class_model p name desc args s
     else if String.eqb cls REFM || String.eqb cls REFC || String.eqb cls REFF

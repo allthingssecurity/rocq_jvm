@@ -10,6 +10,6 @@ for f in phase1 stackops ops2; do run frame harness/targets-$f.txt; done
 # Ops2.big is a 28,000-instruction method (goto_w): the extracted loader needs ~45 s to parse it and
 # fetch is linear in the code, so about 25 s per loop iteration. 20 inputs keep the run under an hour.
 n_all=$n; n=20; run frame harness/targets-ops2big.txt; n=$n_all
-for f in heap strs flt lam cim jdkmodel fld sel indy box msg refl refl2 math sync1 lamconv walscen; do run machine harness/targets-$f.txt; done
-for f in threads threads2 threads3; do run threads harness/targets-$f.txt; done
+for f in heap strs flt lam cim jdkmodel fld sel indy box msg refl refl2 math sync1 lamconv tostr chm tree fmt sort deque regex strregex walscen; do run machine harness/targets-$f.txt; done
+for f in threads threads2 threads3 chmthreads sched pool time; do run threads harness/targets-$f.txt; done
 exit $rc

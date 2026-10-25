@@ -63,6 +63,13 @@ a user object in string concatenation), identity hash codes.
 | `ChmThreads` (ConcurrentHashMap under the thread layer: merge counts, computeIfAbsent once per key, putIfAbsent winners, concurrent resize, replace CAS loop, iteration during writes, compute on one bin) × 6 schedules | 7 | 50 | 0 |
 | `TreeOps` (TreeMap/TreeSet models: natural order and comparators, navigation, poll, compute/merge, iterators with remove, fail-fast, ClassCastException, a TreeSet subclass overriding higher) | 3 | 300 | 0 |
 | `SchedTests` (Semaphore fair/non-fair incl. timed tryAcquire, reducePermits, interrupts and handoff; Timer/TimerTask order, cancel, purge, a failing task; ScheduledThreadPoolExecutor order, Callable results, cancel, fixed rate / fixed delay, shutdown policies; DelayQueue) × 6 schedules | 8 | 30 | 0 |
+| `PoolTests` (ThreadPoolExecutor with the four rejection policies, hooks incl. a failing task, cached pool over SynchronousQueue with keep-alive, shutdownNow, configuration errors and resizing, ScheduledThreadPoolExecutor as a ThreadPoolExecutor, blocking queues, fair ReentrantLock order, uncaught-exception handlers) × 6 schedules | 9 | 20 | 0 |
+| `TimeTests` (the earliest deadline first over sleeps and timed waits, mixed timed tryAcquire/poll/await) × 6 schedules | 3 | 20 | 0 |
+| `FmtOps` (String.format / formatted: a fuzzer of valid and invalid specifiers over random arguments, exception classes and messages; common uses) | 2 | 300 | 0 (format: 4 inputs reach floating-point or date conversions, STUCK) |
+| `SortOps` (Comparator combinators, stable List/ArrayList/Arrays/Collections sorting, CME and range errors, ClassCastException of mixed natural sorts; identity hash code consistency, radix strings) | 2 | 300 | 0 |
+| `DequeTests` (ArrayDeque/Deque/Queue, written by the Camel hunt session) | 2 | 300 | 0 |
+| `RegexOps` (java.util.regex: random patterns with groups, named groups, alternation, classes, greedy/lazy/possessive quantifiers, anchors, `\b`, back references, lookahead, inline flags; find/matches/lookingAt, group/start/end, replaceAll/First, split; typical uses) | 2 | 300 | 0 (22 no-claim: captures the JDK may keep from failed attempts) |
+| `StrRegex` (`String.matches`, `replaceAll`, `replaceFirst`, `split` with and without a limit over a pool of patterns and replacements with group references; CSV / key=value parsing) | 2 | 300 | 0 |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
 | java.util model classes (`targets-jdkmodel.txt`: HashMap, LinkedHashMap, tree bins, copies, ctors, sizing, strings, views, sets, ArrayList, AbstractList, AbstractMap, Collections) | 13 (+1 STUCK by design: identity-hash tie-break) | 10,000 | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
@@ -268,10 +275,11 @@ calls are on receivers of the declaring class, no boxed values are stored into t
   InvocationTargetException's target) and stack traces are not modelled.
 - Threads: the semantics is sequentially consistent (see TRUST.md 5b): the extra behaviours the JMM allows for racy
   programs are not generated; the formal link of `Threads.tstep` to `Concurrency/Executions.v` is not written.
-  Thread ids, daemon threads, priorities' effect, uncaught-exception handlers: `STUCK` or not observable.
+  Daemon threads and priorities' effect: not observable (uncaught-exception handlers are modelled).
 - Class loaders (ClassLoader objects, defineClass, loading constraints) are not modelled: one program, loaded by
   one (bootstrap-like) loader. The bytecode verifier (JVMS 4.10) is not modelled: the class files are javac's.
-- The JDK library beyond the models listed above (I/O, java.time construction, regex (String.split beyond its
-  one-character fast path), String.format, streams, ConcurrentHashMap, locale-sensitive case mapping of non-ASCII
-  strings, ...) is `STUCK`.
+- The JDK library beyond the models listed above (I/O, java.time construction, streams, floating-point
+  formatting (`%f`, `%e`, `Double.toString`), regex lookbehind, possessive back-tracking corner cases and
+  PatternSyntaxException messages, captures the JDK may leak between attempts, locale-sensitive case mapping of
+  non-ASCII strings, ...) is `STUCK`.
 - VirtualMachineErrors are never thrown (TRUST.md 5a).

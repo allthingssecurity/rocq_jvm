@@ -113,6 +113,10 @@ public class TreeMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, 
         return comparator == null ? ((Comparable<Object>) k1).compareTo(k2) : comparator.compare((K) k1, (K) k2);
     }
 
+    static boolean isJdkComparableX(Object x) {
+        return isJdkComparable(x);
+    }
+
     private static boolean isJdkComparable(Object x) {
         return x instanceof String || x instanceof Integer || x instanceof Long || x instanceof Short
             || x instanceof Byte || x instanceof Character || x instanceof Boolean;

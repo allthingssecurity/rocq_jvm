@@ -89,7 +89,9 @@ Results of `call_static`:
 - `MRValue (Some v) s` / `MRValue None s`: a normal return.
 - `MRExc l s`: an uncaught exception; `exn_class s l` gives its class.
 - `MRStuck why`: **a model gap, not a bug in your code.** The string names the missing piece, for example
-  "no model for java/util/regex/Pattern.compile". Either model it or change the driver to avoid it.
+  "no model for java/nio/file/Files.readAllBytes". Either model it or change the driver to avoid it.
+  Many JDK models are Java classes run as bytecode (`classes/jdkmodel`, `classes/threadmodel`): put them
+  on the class path after your own classes, or calls into them are STUCK as missing classes.
 - `MROutOfFuel`: increase the fuel (the `10000` above).
 
 To pass objects instead of building them in Java, construct the heap yourself and run `mrun`. See
@@ -116,8 +118,9 @@ following directories; `classes/jdkmodel` holds the clean-room java.util models 
 The thread layer (`theories/Core/Threads.v`) gives an interleaving semantics: monitors, wait/notify,
 interrupts, start/join, sleep, timed waits, and a clock for `System.nanoTime`/`currentTimeMillis`.
 Clean-room model classes (`harness/threads/src`, built into `classes/threadmodel`) provide `Thread`, `ThreadLocal`,
-`ReentrantLock` with `Condition` (non-fair only), `AtomicInteger/Long/Boolean/Reference`, `CountDownLatch`,
-`TimeUnit`, `Executors` (fixed / single / cached pools), `ExecutorService`, `Future`/`FutureTask`.
+`ReentrantLock` with `Condition`, `AtomicInteger/Long/Boolean/Reference`, `CountDownLatch`, `Semaphore`,
+`TimeUnit`, `Executors`, `ThreadPoolExecutor`, `ScheduledThreadPoolExecutor`, blocking queues, `Future`/`FutureTask`,
+`Timer`/`TimerTask`.
 `ConcurrentHashMap` is a model class in `harness/jdkmodel`. The semantics is sequentially consistent: it explores
 interleavings, but not the extra weak-memory outcomes of racy programs.
 
@@ -133,10 +136,19 @@ call_static_threads p mdl sch fuel "MyScenario" "race" "(I)I" [VInt 0]   (* : tr
   interleaving is replayed exactly and checked by `vm_compute`.
 - Possible results: `TRValue`, `TRExc`, `TRDeadlock` (no thread can step: a deadlock witness), `TRStuckRun`
   (model gap) and `TROutOfFuel`.
-- The clock starts at 0 and advances by 1 ns per step; when every thread waits with a timeout, it jumps to the
-  earliest deadline. A theorem cannot yet supply its own clock readings (request R4).
-- Not modelled yet: `Semaphore`, `DelayQueue`, `Timer`/`TimerTask`, `ScheduledExecutorService`, fair locks,
-  `TreeMap`/`TreeSet`, `String.format` (requests R5, R7-R9). Code that reaches them is STUCK.
+- The clock starts at 0 (or at the value given to `call_static_threads_at`) and advances by 1 ns per step; when
+  every thread waits with a timeout or sleeps, it jumps to a deadline. `Thread.sleep(ms)` ends only once `ms` have
+  passed, so a driver makes time pass by sleeping.
+- Also modelled: `ThreadPoolExecutor` (core/max sizes, keep-alive, the four rejection policies, hooks) with
+  `ScheduledThreadPoolExecutor` as its subclass, `LinkedBlockingQueue`, `ArrayBlockingQueue`, `SynchronousQueue`,
+  `DelayQueue`, `Semaphore`, fair and non-fair `ReentrantLock`, `Timer`/`TimerTask`, uncaught-exception handlers,
+  `ConcurrentHashMap`, `TreeMap`/`TreeSet`, `String.format` (no floating-point or date conversions).
+- `call_static_threads_gen p mdl sch fuel clock0 ticks ...`: with `ticks = true` the schedule may also let time
+  pass (jump to the earliest deadline) at any step, so timeouts can fire while other threads run.
+- Identity hash codes come from `j_ihash` of the `jenv` (TRUST.md 5c): fix it in a counterexample, quantify over
+  it in a proof.
+- Not modelled: `invokeAny`, timed
+  `invokeAll`, `Condition.awaitUntil`, Phaser/CyclicBarrier/Exchanger/ForkJoinPool/CompletableFuture.
 - Put `classes/threadmodel` (and `classes/jdkmodel`) on the class path after the code under test; compile
   drivers with `harness/threads/build.sh`.
 - Differential test: `MODE=threads harness/difftest.sh targets.txt 300`. Each input runs under 6 schedulers;
@@ -156,6 +168,7 @@ Templates:
 ## 5. What to trust, and the known gaps
 - `TRUST.md` lists everything a result depends on: the model's rules, the JDK models, Rocq's kernel and `vm_compute`.
 - Not modelled: the weak behaviours of racy programs under the Java memory model, class loaders and
-  the verifier, and large parts of the JDK (I/O, regex, `String.format`, streams, ConcurrentHashMap).
+  the verifier, and parts of the JDK (I/O, streams, floating-point formatting, regex lookbehind, java.time
+  construction). The modelled library is listed in `TRUST.md` 5b and `STATUS.md`.
   Code that reaches them returns `MRStuck "no model for ..."`. It never silently returns a wrong answer.
 - `STATUS.md` lists what has been tested against HotSpot, and how much.

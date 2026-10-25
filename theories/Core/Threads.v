@@ -177,7 +177,8 @@ Definition machine_step (p : program) (mdl : model) (tm : tmstate) (i : nat) (t 
 Definition run_code : code :=
   {| c_max_stack := 1; c_max_locals := 1; c_length := 5;
      c_instrs := [(0, Load KA 0);
-                  (1, Invoke InvVirtual {| mr_class := THREAD; mr_name := "run"; mr_desc := "()V"; mr_interface := false |});
+                  (* the model class's runEntry: run(), then the uncaught-exception handler *)
+                  (1, Invoke InvSpecial {| mr_class := THREAD; mr_name := "runEntry"; mr_desc := "()V"; mr_interface := false |});
                   (4, Return None)];
      c_handlers := nil |}.
 Definition run_method : method := {| m_name := "<thread>"; m_desc := "()V"; m_access := 8; m_code := Some run_code |}.
@@ -301,7 +302,11 @@ Definition thread_step0 (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i
   | None => TRBlocked
   | Some t =>
   match th_status t with
-  | TDone _ | TDead _ | TWait _ _ _ => TRBlocked
+  | TDone _ | TDead _ | TWait _ _ None => TRBlocked
+  | TWait l c (Some d) =>
+      (* a timed wait times out once the clock has reached its deadline (JLS 17.2.1) *)
+      if tm_clock tm <? d then TRBlocked
+      else TRNext (with_threads tm (set_th (tm_threads tm) i (with_status t (th_locks t) (TReacq l c false))))
   | TReacq l c intr =>
       (* reacquire the monitor, then finish the wait invoke (still at its pc) *)
       if held_other (tm_threads tm) 0 i l then TRBlocked
@@ -508,24 +513,26 @@ Fixpoint nth_choice {A} (l : list A) (k : nat) : option A :=
   | nil, _ => None
   end.
 
-Fixpoint timed_waiter (ts : list thread) (k : nat) : option (nat * thread * Z * Z * Z) :=
+(** The earliest deadline of a timed wait or a sleep. *)
+Fixpoint next_deadline (ts : list thread) : option Z :=
   match ts with
   | nil => None
-  | t :: r => match th_status t with TWait l c (Some d) => Some (k, t, l, c, d) | _ => timed_waiter r (S k) end
+  | t :: r =>
+      let d := match th_status t with TWait _ _ (Some d) => Some d | TSleep false d => Some d | _ => None end in
+      match d, next_deadline r with
+      | Some x, Some y => Some (Z.min x y)
+      | Some x, None => Some x
+      | None, e => e
+      end
   end.
 
-(** The earliest end of a sleep. *)
-Fixpoint sleep_deadline (ts : list thread) : option Z :=
-  match ts with
-  | nil => None
-  | t :: r => match th_status t, sleep_deadline r with
-              | TSleep false d, Some e => Some (Z.min d e)
-              | TSleep false d, None => Some d
-              | _, e => e
-              end
-  end.
-
-Fixpoint trun (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (step : nat) (tm : tmstate) : tresult :=
+(** Executable runs. Each step advances the clock by 1 ns. When no thread can step, the clock
+    jumps to the earliest deadline (then the timed waits and sleeps that end there can step; the
+    scheduler chooses among them). With [ticks], jumping to the earliest deadline is also one of
+    the scheduler's choices at every step (the last one), so a schedule can let a timeout happen
+    while other threads are still running. *)
+Fixpoint trun_gen (ticks : bool) (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (step : nat) (tm : tmstate)
+  : tresult :=
   match option_map th_status (nth_th (tm_threads tm) O) with
   | Some (TDone v) => TRValue v tm
   | Some (TDead e) => TRExc e tm
@@ -535,30 +542,35 @@ Fixpoint trun (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (step :
     | S fuel' =>
       let ch := sch step in
       let cands := steppable p mdl ch tm O (length (tm_threads tm)) in
+      let future := match next_deadline (tm_threads tm) with
+                    | Some d => if tm_clock tm <? d then Some d else None
+                    | None => None
+                    end in
       match cands with
       | nil =>
-          (* nothing can step: a timed wait times out (the first one), otherwise deadlock *)
-          match timed_waiter (tm_threads tm) O with
-          | Some (i, t, l, c, d) =>
-              (* the clock jumps to the deadline *)
-              trun p mdl sch fuel' (S step) (set_clock (with_threads tm (set_th (tm_threads tm) i
-                {| th_obj := th_obj t; th_frames := th_frames t; th_locks := th_locks t; th_sync := th_sync t;
-                   th_status := TReacq l c false |})) (Z.max (tm_clock tm) d))
-          | None =>
-              match sleep_deadline (tm_threads tm) with
-              | Some d => if tm_clock tm <? d then trun p mdl sch fuel' (S step) (set_clock tm d) else TRDeadlock tm
-              | None => TRDeadlock tm
-              end
+          match future with
+          | Some d => trun_gen ticks p mdl sch fuel' (S step) (set_clock tm d)
+          | None => TRDeadlock tm
           end
       | _ =>
-        match nth_choice cands (Nat.modulo ch (length cands)) with
-        | Some (_, TRNext tm') => trun p mdl sch fuel' (S step) (set_clock tm' (tm_clock tm' + 1))
+        let n := length cands in
+        let k := Nat.modulo ch (if ticks && match future with Some _ => true | None => false end then S n else n) in
+        if Nat.eqb k n then
+          match future with
+          | Some d => trun_gen ticks p mdl sch fuel' (S step) (set_clock tm d)
+          | None => TRStuckRun "scheduler"
+          end
+        else
+        match nth_choice cands k with
+        | Some (_, TRNext tm') => trun_gen ticks p mdl sch fuel' (S step) (set_clock tm' (tm_clock tm' + 1))
         | Some (_, TRStuck w) => TRStuckRun w
         | _ => TRStuckRun "scheduler"
         end
       end
     end
   end.
+
+Definition trun := trun_gen false.
 
 (** The initial state: one thread running the entry frame of [Machine.entry_state]. *)
 Definition tm_of (s : mstate) : tmstate :=
@@ -574,6 +586,14 @@ Definition call_static_threads_at (p : program) (mdl : model) (sch : scheduler) 
            (cls name desc : string) (args : list value) : tresult :=
   match entry_state cls name desc args with
   | Some s => trun p mdl sch fuel O (set_clock (tm_of s) clock0)
+  | None => TRStuckRun "entry: bad descriptor or arguments"
+  end.
+
+(** The general entry point: start clock [clock0], and [ticks] as in [trun_gen]. *)
+Definition call_static_threads_gen (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (clock0 : Z) (ticks : bool)
+           (cls name desc : string) (args : list value) : tresult :=
+  match entry_state cls name desc args with
+  | Some s => trun_gen ticks p mdl sch fuel O (set_clock (tm_of s) clock0)
   | None => TRStuckRun "entry: bad descriptor or arguments"
   end.
 

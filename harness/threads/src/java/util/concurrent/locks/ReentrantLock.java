@@ -1,7 +1,9 @@
 /*
- * Clean-room model of ReentrantLock (non-fair) over a monitor. lock() is not interruptible (an
- * interrupt during lock() is remembered and re-asserted, as in AQS); lockInterruptibly() is.
- * Conditions: newCondition() (await / signal / signalAll). Timed operations are STUCK.
+ * Clean-room model of ReentrantLock over a monitor. A fair lock is granted in arrival order (a
+ * thread that finds others waiting queues behind them); a non-fair one lets a newcomer take a free
+ * lock. tryLock() barges even when fair (Javadoc). lock() is not interruptible (an interrupt during
+ * lock() is remembered and re-asserted, as in AQS); lockInterruptibly() is. Conditions:
+ * newCondition() (await / signal / signalAll, timed awaits). awaitUntil(Date) is STUCK.
  */
 package java.util.concurrent.locks;
 
@@ -11,30 +13,68 @@ public class ReentrantLock implements Lock, java.io.Serializable {
     private Thread owner;
     private int holds;
     private final Object mon = new Object();
+    private final boolean fair;
+    /** Arrival tickets of the threads waiting for the lock, oldest first. */
+    private final java.util.ArrayList<Long> queue = new java.util.ArrayList<>();
+    private final java.util.ArrayList<Thread> queuedThreads = new java.util.ArrayList<>();
+    private long nextTicket;
 
-    public ReentrantLock() { }
-    public ReentrantLock(boolean fair) { if (fair) fairNotModelled0(); }
-    private native void fairNotModelled0();
+    public ReentrantLock() { this.fair = false; }
+    public ReentrantLock(boolean fair) { this.fair = fair; }
+
+    /** May the waiter with this ticket take the free lock now? Fair: only the oldest waiter. */
+    private boolean mayTake(long ticket) {
+        return owner == null && (!fair || queue.get(0).longValue() == ticket);
+    }
+
+    /** Acquire for me (mon held). timeoutNanos < 0: no timeout. False on timeout. */
+    private boolean acquire(Thread me, boolean interruptible, long timeoutNanos, int count) throws InterruptedException {
+        if (owner == me) { holds += count; return true; }
+        if (owner == null && (!fair || queue.isEmpty())) { owner = me; holds = count; return true; }
+        long ticket = nextTicket++;
+        queue.add(ticket);
+        queuedThreads.add(me);
+        boolean interrupted = false;
+        long deadline = timeoutNanos >= 0 ? System.nanoTime() + timeoutNanos : 0L;
+        long nanos = timeoutNanos;
+        try {
+            while (!mayTake(ticket)) {
+                try {
+                    if (timeoutNanos < 0) {
+                        mon.wait();
+                    } else {
+                        if (nanos <= 0) return false;
+                        mon.wait(Math.max(1, nanos / 1000000L));
+                        nanos = deadline - System.nanoTime();
+                    }
+                } catch (InterruptedException e) {
+                    if (interruptible) throw e;
+                    interrupted = true;
+                }
+            }
+            owner = me;
+            holds = count;
+            return true;
+        } finally {
+            queue.remove(Long.valueOf(ticket));
+            queuedThreads.remove(me);
+            mon.notifyAll();
+            if (interrupted) me.interrupt();
+        }
+    }
 
     public void lock() {
         Thread me = Thread.currentThread();
-        boolean interrupted = false;
         synchronized (mon) {
-            while (owner != null && owner != me) {
-                try { mon.wait(); } catch (InterruptedException e) { interrupted = true; }
-            }
-            owner = me; holds++;
+            try { acquire(me, false, -1L, 1); } catch (InterruptedException e) { throw new IllegalStateException(e); }
         }
-        if (interrupted) me.interrupt();
     }
     public void lockInterruptibly() throws InterruptedException {
         Thread me = Thread.currentThread();
         if (Thread.interrupted()) throw new InterruptedException();
-        synchronized (mon) {
-            while (owner != null && owner != me) mon.wait();
-            owner = me; holds++;
-        }
+        synchronized (mon) { acquire(me, true, -1L, 1); }
     }
+    /** Javadoc: barges even when the lock is fair. */
     public boolean tryLock() {
         Thread me = Thread.currentThread();
         synchronized (mon) {
@@ -45,17 +85,8 @@ public class ReentrantLock implements Lock, java.io.Serializable {
     public boolean tryLock(long timeout, TimeUnit unit) throws InterruptedException {
         Thread me = Thread.currentThread();
         if (Thread.interrupted()) throw new InterruptedException();
-        long nanos = unit.toNanos(timeout);
-        synchronized (mon) {
-            long deadline = System.nanoTime() + nanos;
-            while (owner != null && owner != me) {
-                if (nanos <= 0) return false;
-                mon.wait(Math.max(1, nanos / 1000000L));
-                nanos = deadline - System.nanoTime();
-            }
-            owner = me; holds++;
-            return true;
-        }
+        long nanos = Math.max(0L, unit.toNanos(timeout));
+        synchronized (mon) { return acquire(me, true, nanos, 1); }
     }
     public void unlock() {
         synchronized (mon) {
@@ -63,10 +94,14 @@ public class ReentrantLock implements Lock, java.io.Serializable {
             if (--holds == 0) { owner = null; mon.notifyAll(); }
         }
     }
+    public final boolean hasQueuedThreads() { synchronized (mon) { return !queue.isEmpty(); } }
+    public final boolean hasQueuedThread(Thread thread) { synchronized (mon) { return queuedThreads.contains(thread); } }
+    public final int getQueueLength() { synchronized (mon) { return queue.size(); } }
+    protected Thread getOwner() { synchronized (mon) { return owner; } }
     public boolean isLocked() { synchronized (mon) { return owner != null; } }
     public boolean isHeldByCurrentThread() { synchronized (mon) { return owner == Thread.currentThread(); } }
     public int getHoldCount() { synchronized (mon) { return owner == Thread.currentThread() ? holds : 0; } }
-    public final boolean isFair() { return false; }
+    public final boolean isFair() { return fair; }
     public Condition newCondition() { return new Cond(this); }
 
     // release fully, wait on the condition's monitor, then reacquire with the same hold count
@@ -78,14 +113,9 @@ public class ReentrantLock implements Lock, java.io.Serializable {
     }
     private void reacquire(int h) {
         Thread me = Thread.currentThread();
-        boolean interrupted = false;
         synchronized (mon) {
-            while (owner != null && owner != me) {
-                try { mon.wait(); } catch (InterruptedException e) { interrupted = true; }
-            }
-            owner = me; holds = h;
+            try { acquire(me, false, -1L, h); } catch (InterruptedException e) { throw new IllegalStateException(e); }
         }
-        if (interrupted) me.interrupt();
     }
     private boolean ownedByMe() { synchronized (mon) { return owner == Thread.currentThread(); } }
 

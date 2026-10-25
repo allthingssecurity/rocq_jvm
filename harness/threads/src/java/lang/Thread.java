@@ -2,8 +2,7 @@
  * Clean-room model of java.lang.Thread for the Rocq JVM machine (theories/Core/Threads.v).
  * Loaded only by the machine, never by HotSpot. The thread layer implements the private
  * natives start0, join0, isAlive0, currentThread, sleep0 and yield0. Everything the model
- * does not cover (interrupts, timed join, thread ids, thread groups, uncaught-exception
- * handlers, toString) is a native without a model, so a run that uses it is STUCK (no claim).
+ * does not cover (thread groups, toString) is a native without a model, so a run that uses it is STUCK (no claim).
  * Written from the JDK 21 javadoc and source of java.lang.Thread.
  */
 package java.lang;
@@ -37,6 +36,29 @@ public class Thread implements Runnable {
     public void run() {
         Runnable task = target;
         if (task != null) task.run();
+    }
+
+    // Uncaught exceptions (JDK 21 Thread.dispatchUncaughtException): the thread's handler, else
+    // the default handler, else the thread group's, which prints to System.err (not modelled:
+    // nothing observable on stdout). The thread layer starts every thread here.
+    @FunctionalInterface
+    public interface UncaughtExceptionHandler {
+        void uncaughtException(Thread t, Throwable e);
+    }
+    private volatile UncaughtExceptionHandler uncaughtExceptionHandler;
+    private static volatile UncaughtExceptionHandler defaultUncaughtExceptionHandler;
+    public void setUncaughtExceptionHandler(UncaughtExceptionHandler ueh) { uncaughtExceptionHandler = ueh; }
+    public UncaughtExceptionHandler getUncaughtExceptionHandler() { return uncaughtExceptionHandler; }
+    public static void setDefaultUncaughtExceptionHandler(UncaughtExceptionHandler ueh) { defaultUncaughtExceptionHandler = ueh; }
+    public static UncaughtExceptionHandler getDefaultUncaughtExceptionHandler() { return defaultUncaughtExceptionHandler; }
+    private void runEntry() {
+        try {
+            run();
+        } catch (Throwable e) {
+            UncaughtExceptionHandler h = uncaughtExceptionHandler;
+            if (h == null) h = defaultUncaughtExceptionHandler;
+            if (h != null) h.uncaughtException(this, e);
+        }
     }
 
     public void start() {

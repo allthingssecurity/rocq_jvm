@@ -47,7 +47,10 @@ let uenv = {
   u_is_digit = (fun z -> match inr z with Some i -> fl.(i) land 4 <> 0 | None -> false);
   u_is_upper = (fun z -> match inr z with Some i -> fl.(i) land 8 <> 0 | None -> false);
   u_is_lower = (fun z -> match inr z with Some i -> fl.(i) land 16 <> 0 | None -> false) }
-let env = { j_u = uenv; j_log_enabled = (fun _ -> false) }
+(* identity hash codes: a fixed mix of the heap address (HotSpot's are unspecified: results that depend
+   on them are not comparable) *)
+let env = { j_u = uenv; j_log_enabled = (fun _ -> false);
+            j_ihash = (fun z -> z_of_int (((int_of_z z) * 2654435761) land 0x7fffffff)) }
 
 let hex_units s =
   let n = String.length s / 4 in

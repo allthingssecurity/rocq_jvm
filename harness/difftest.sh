@@ -16,7 +16,7 @@ mkdir -p harness/results harness/work
 res=harness/results/$(date -u +%Y-%m-%d).tsv
 [[ -f $res ]] || printf 'time\tclass\tmethod\tdesc\tinputs\tagree\tmismatches\thotspot_exceptions\tmodel_stuck\tseed\n' > "$res"
 [[ -x harness/model_main.exe ]] || { echo "build harness/model_main.exe first (harness/build.sh)"; exit 2; }
-[[ -f harness/work/DiffRunner.class ]] || javac -d harness/work harness/java/DiffRunner.java 2>/dev/null
+[[ harness/work/DiffRunner.class -nt harness/java/DiffRunner.java ]] || javac -d harness/work harness/java/DiffRunner.java 2>/dev/null  # rebuilt when the source is newer
 rc=0
 while read -r dir cls meth desc opt; do
   [[ -z "$dir" || "$dir" == \#* ]] && continue
