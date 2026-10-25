@@ -29,7 +29,7 @@ Definition l1_uenv : uenv := {|
   u_is_upper := fun c => (65 <=? c) && (c <=? 90);
   u_is_lower := fun c => (97 <=? c) && (c <=? 122) |}.
 
-Definition env : jenv := {| j_u := l1_uenv; j_log_enabled := fun _ => false; j_ihash := fun l => l |}.
+Definition env : jenv := {| j_u := l1_uenv; j_log_enabled := fun _ => false; j_ihash := fun l => l; j_seed := fun _ => 0 |}.
 
 Definition main_files := CimMain_CaseInsensitiveMap.bytes :: CimScenMain.files ++ CimJdk.files.
 Definition fix_files := CimFix_CaseInsensitiveMap.bytes :: CimScenFix.files ++ CimJdk.files.

@@ -1,0 +1,4 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.StreamOps fuzz (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.StreamOps ints (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.StreamOps collectors (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.StreamOps common (I)Ljava/lang/String;

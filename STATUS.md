@@ -70,6 +70,15 @@ a user object in string concatenation), identity hash codes.
 | `DequeTests` (ArrayDeque/Deque/Queue, written by the Camel hunt session) | 2 | 300 | 0 |
 | `RegexOps` (java.util.regex: random patterns with groups, named groups, alternation, classes, greedy/lazy/possessive quantifiers, anchors, `\b`, back references, lookahead, inline flags; find/matches/lookingAt, group/start/end, replaceAll/First, split; typical uses) | 2 | 300 | 0 (22 no-claim: captures the JDK may keep from failed attempts) |
 | `StrRegex` (`String.matches`, `replaceAll`, `replaceFirst`, `split` with and without a limit over a pool of patterns and replacements with group references; CSV / key=value parsing) | 2 | 300 | 0 |
+| `StreamOps` (sequential Stream/IntStream/LongStream pipelines from random operations: lambda call order, laziness, short-circuiting, flags (sized/distinct/sorted), reuse and close errors, onClose; Collectors incl. groupingBy/partitioningBy/toMap merge errors/teeing; Optional*; StringJoiner; java.util.function defaults) | 4 | 300 | 0 |
+| `ImmOps` (List.of/copyOf, Set.of/copyOf, Map.of/ofEntries/entry/copyOf: null checks with HotSpot's helpful NPE messages, duplicates, unsupported operations, sub lists, iterators, class names; set/map iteration through the salt parameter, compared sorted) | 4 | 200 | 0 |
+| `MiscOps` (System.arraycopy: every check and HotSpot message; java.util.Objects: equals/hashCode/hash/toString callbacks, requireNonNull* messages, checkIndex) | 2 | 300 | 0 |
+| `CowOps` (CopyOnWriteArrayList/Set incl. sub lists and snapshot iterators, ConcurrentLinkedQueue/Deque incl. weakly consistent iterators, exceptions) | 4 | 300 | 0 |
+| `ListMsgOps` (ArrayList messages, ArrayList.subList nested/co-modification/bulk operations, AbstractList views of Arrays.asList and the Collections lists, clone of ArrayList/HashMap/HashSet) | 3 | 300 | 0 |
+| `ExcOps` (Throwable: causes, initCause errors, addSuppressed incl. try-with-resources and disabled suppression, getLocalizedMessage/getMessage overrides, toString of JDK and user exceptions) | 2 | 300 | 0 |
+| `CharsetOps` (String.getBytes / new String(byte[], ...) in UTF-8 (malformed input), ISO-8859-1, US-ASCII, UTF-16/BE/LE; Charset lookup, names, errors; String(char[]/StringBuilder/String) constructors; Double/Float boxes: equals/hashCode/compareTo/compare/bit conversions) | 4 | 300 | 0 |
+| `CfTests` (CompletableFuture: chains, errors, exact dependent order (nested, combine/either, allOf/anyOf), cancel, timeouts, waiters, rejection; StampedLock stamps, queue, threads) × 6 schedules | 15 | 20 | 0 |
+| `CowThreads` (copy-on-write lists/sets and concurrent linked queues/deques under three or four threads) × 6 schedules | 4 | 20 | 0 |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
 | java.util model classes (`targets-jdkmodel.txt`: HashMap, LinkedHashMap, tree bins, copies, ctors, sizing, strings, views, sets, ArrayList, AbstractList, AbstractMap, Collections) | 13 (+1 STUCK by design: identity-hash tie-break) | 10,000 | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
@@ -278,8 +287,13 @@ calls are on receivers of the declaring class, no boxed values are stored into t
   Daemon threads and priorities' effect: not observable (uncaught-exception handlers are modelled).
 - Class loaders (ClassLoader objects, defineClass, loading constraints) are not modelled: one program, loaded by
   one (bootstrap-like) loader. The bytecode verifier (JVMS 4.10) is not modelled: the class files are javac's.
-- The JDK library beyond the models listed above (I/O, java.time construction, streams, floating-point
-  formatting (`%f`, `%e`, `Double.toString`), regex lookbehind, possessive back-tracking corner cases and
-  PatternSyntaxException messages, captures the JDK may leak between attempts, locale-sensitive case mapping of
-  non-ASCII strings, ...) is `STUCK`.
+- The JDK library beyond the models listed above (I/O beyond the exception classes, java.time construction,
+  parallel streams and DoubleStream, decimal conversion of floating-point numbers (`Double.toString`,
+  `parseDouble`, `%f`, `%e`), charsets other than the six standard ones, regex lookbehind, PatternSyntaxException
+  messages, captures the JDK may leak between attempts, locale-sensitive case mapping of non-ASCII strings, ...)
+  is `STUCK`.
+- HotSpot's helpful NullPointerException messages (JEP 358) of null checks in user bytecode are not computed:
+  `getMessage()` of such an exception is STUCK (the model classes throw the JDK's exact messages themselves).
+- A thread does not inherit its creator's daemon status and priority in the Thread model (JDK: it does);
+  thread pools normalise both, so only directly created threads in daemon threads differ.
 - VirtualMachineErrors are never thrown (TRUST.md 5a).

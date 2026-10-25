@@ -1,0 +1,4 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CowOps cowList (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CowOps cowSet (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CowOps linkedQueue (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CowOps linkedDeque (I)Ljava/lang/String;

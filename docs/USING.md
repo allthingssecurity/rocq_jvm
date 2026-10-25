@@ -145,10 +145,14 @@ call_static_threads p mdl sch fuel "MyScenario" "race" "(I)I" [VInt 0]   (* : tr
   `ConcurrentHashMap`, `TreeMap`/`TreeSet`, `String.format` (no floating-point or date conversions).
 - `call_static_threads_gen p mdl sch fuel clock0 ticks ...`: with `ticks = true` the schedule may also let time
   pass (jump to the earliest deadline) at any step, so timeouts can fire while other threads run.
-- Identity hash codes come from `j_ihash` of the `jenv` (TRUST.md 5c): fix it in a counterexample, quantify over
-  it in a proof.
-- Not modelled: `invokeAny`, timed
-  `invokeAll`, `Condition.awaitUntil`, Phaser/CyclicBarrier/Exchanger/ForkJoinPool/CompletableFuture.
+- `CompletableFuture` (the JDK's order of dependent actions; pass an explicit executor: the default async
+  executor depends on the host, so its threads' names are unknown), `StampedLock`, `CopyOnWriteArrayList/Set`,
+  `ConcurrentLinkedQueue/Deque`.
+- Identity hash codes come from `j_ihash` of the `jenv` (TRUST.md 5c), and the per-run salt of `Set.of`/`Map.of`
+  from `j_seed 0` (TRUST.md 5d): fix them in a counterexample, quantify over them in a proof. Every `jenv` record
+  now needs `j_seed := ...` (e.g. `fun _ => 0`).
+- Not modelled: `invokeAny`, timed `invokeAll`, `Condition.awaitUntil`, Phaser/CyclicBarrier/Exchanger/
+  ForkJoinPool, parallel streams.
 - Put `classes/threadmodel` (and `classes/jdkmodel`) on the class path after the code under test; compile
   drivers with `harness/threads/build.sh`.
 - Differential test: `MODE=threads harness/difftest.sh targets.txt 300`. Each input runs under 6 schedulers;

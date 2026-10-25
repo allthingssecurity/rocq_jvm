@@ -1,0 +1,4 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ImmOps lists (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ImmOps sets (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ImmOps maps (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ImmOps iteration (I)Ljava/lang/String;

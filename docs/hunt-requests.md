@@ -170,3 +170,14 @@ if they fit its conventions.
 | R12 identity hash codes | `jenv.j_ihash : Z -> Z` (identity hash of a heap address, chosen by the theorem); `Object.hashCode`, `Object.toString` (class@hex), `System.identityHashCode`. Tree-bin orders that depend on identity hashes stay STUCK (TRUST.md 5c). Also `Integer`/`Long.toHexString`, `toOctalString`, `toBinaryString`, `java.lang.reflect.Array.newInstance` (so `toArray(new T[0])` works) | `SortOps.identity` × 300 (consistency only): 0 mismatches |
 | R13 ArrayDeque/Deque/Queue | adopted into `harness/jdkmodel` (with `AbstractQueue`); the hunt's `DequeTests` moved to `harness/jdkmodel/tests` | `DequeTests` 2 × 300: 0 mismatches |
 | R14 small gaps | `LongAdder`, `ArrayBlockingQueue`, `LinkedBlockingQueue`, `SynchronousQueue`, `DelayQueue`, `ThreadPoolExecutor` (+ policies, hooks), `ScheduledThreadPoolExecutor extends ThreadPoolExecutor`, fair `ReentrantLock`, uncaught-exception handlers, `String.format` (R9). `java.util.regex` (`Pattern`, `Matcher`: groups, named groups, classes, greedy/lazy/possessive quantifiers, anchors, back references, lookahead, inline flags, replace, split), and `String.matches`, `replaceAll`, `replaceFirst`, `split` run on it. STUCK: lookbehind, malformed patterns (PatternSyntaxException messages), captures the JDK may keep from failed attempts | `PoolTests` 9 × 20 × 6 schedules; `RegexOps` 2 × 300 (22 no-claim); `StrRegex` 2 × 300: 0 mismatches |
+
+### Model batch 2 (model session, 2026-10-25), unprompted gap closing from a survey of camel-core's JDK use
+| Area | Now modelled | Evidence (0 mismatches) |
+|---|---|---|
+| streams | sequential `Stream`/`IntStream`/`LongStream`, `Collectors`, `Optional*`, `StringJoiner`, `java.util.function` defaults (parallel and `DoubleStream` STUCK) | `StreamOps` 4 × 300 |
+| async | `CompletableFuture` (exact dependent order; explicit executors; default executor threads have unknown names), `StampedLock` | `CfTests` 15 × 20 × 6 schedules |
+| collections | `List.of`/`Set.of`/`Map.of` (salt = `j_seed 0`), `CopyOnWriteArrayList/Set`, `ConcurrentLinkedQueue/Deque`, `ArrayList.subList`, `AbstractList.subList`, `clone` of ArrayList/HashMap/HashSet/TreeMap/TreeSet | `ImmOps`, `CowOps`, `ListMsgOps`, `CowThreads` |
+| exceptions | causes, `initCause`, `addSuppressed` (try-with-resources), `toString`/`getLocalizedMessage` of user exceptions, `java.io.IOException` family | `ExcOps` 2 × 300 |
+| strings | `getBytes`/`new String(byte[], ...)` in UTF-8/ISO-8859-1/US-ASCII/UTF-16*, `Charset`, `new String(char[] / StringBuilder / String)`, `Objects.*` callbacks, `System.arraycopy` messages, `Double`/`Float` boxes | `CharsetOps`, `MiscOps` |
+| soundness fixes | wrong (null) exception messages in the older ArrayList / Collections.emptyList / singletonList / HashMap models | `ListMsgOps` |
+Breaking change for theorem files: `jenv` has a new field `j_seed : Z -> Z` (add `j_seed := fun _ => 0`).

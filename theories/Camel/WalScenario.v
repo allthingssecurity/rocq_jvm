@@ -40,7 +40,7 @@ Definition ascii_uenv : uenv := {|
   u_is_upper := fun c => (65 <=? c) && (c <=? 90);
   u_is_lower := fun c => (97 <=? c) && (c <=? 122) |}.
 
-Definition env (log : bool) : jenv := {| j_u := ascii_uenv; j_log_enabled := fun _ => log; j_ihash := fun l => l |}.
+Definition env (log : bool) : jenv := {| j_u := ascii_uenv; j_log_enabled := fun _ => log; j_ihash := fun l => l; j_seed := fun _ => 0 |}.
 
 Definition result_int (r : mresult) : option Z :=
   match r with MRValue (Some (VInt z)) _ => Some z | _ => None end.

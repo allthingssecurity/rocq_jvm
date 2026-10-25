@@ -22,8 +22,25 @@ public class Thread implements Runnable {
 
     private static synchronized int nextThreadNum() { return threadNumber++; }
 
-    public Thread() { this.name = "Thread-" + nextThreadNum(); }
-    public Thread(Runnable task) { this.target = task; this.name = "Thread-" + nextThreadNum(); }
+    public Thread() { this.name = "Thread-" + nextThreadNum(); this.nameUnknown = numberingUnknown; }
+    public Thread(Runnable task) { this.target = task; this.name = "Thread-" + nextThreadNum(); this.nameUnknown = numberingUnknown; }
+
+    // Threads of CompletableFuture's default executor are ForkJoinPool.commonPool() workers or a new
+    // Thread per task, depending on the host's processor count, which the model does not know: the
+    // name, daemon status and priority of such a thread, and the numbers of the "Thread-N" names
+    // given after one was made, are unknown. Reading an unknown one is STUCK (no claim).
+    private static boolean numberingUnknown;
+    private boolean nameUnknown, daemonUnknown, priorityUnknown;
+    /** rocq-jvm model hook (not JDK API), for CompletableFuture's default executor. */
+    public static Thread newHostDependentThread$(Runnable task) {
+        Thread t = new Thread(task, "");
+        t.nameUnknown = true;
+        t.daemonUnknown = true;
+        t.priorityUnknown = true;
+        numberingUnknown = true;
+        return t;
+    }
+    private static native RuntimeException hostDependent(String what);
     public Thread(String name) { this.name = checkName(name); }
     public Thread(Runnable task, String name) { this.target = task; this.name = checkName(name); }
 
@@ -102,17 +119,28 @@ public class Thread implements Runnable {
 
     public static void onSpinWait() { }
 
-    public final String getName() { return name; }
-    public final synchronized void setName(String name) { this.name = checkName(name); }
-    public final boolean isDaemon() { return daemon; }
+    public final String getName() {
+        if (nameUnknown) throw hostDependent("Thread.getName: host-dependent name");
+        return name;
+    }
+    public final synchronized void setName(String name) { this.name = checkName(name); nameUnknown = false; }
+    public final boolean isDaemon() {
+        if (daemonUnknown) throw hostDependent("Thread.isDaemon: host-dependent daemon status");
+        return daemon;
+    }
     public final void setDaemon(boolean on) {
         if (started) throw new IllegalThreadStateException();
         daemon = on;
+        daemonUnknown = false;
     }
-    public final int getPriority() { return priority; }
+    public final int getPriority() {
+        if (priorityUnknown) throw hostDependent("Thread.getPriority: host-dependent priority");
+        return priority;
+    }
     public final void setPriority(int p) {
         if (p > MAX_PRIORITY || p < MIN_PRIORITY) throw new IllegalArgumentException();
         priority = p;
+        priorityUnknown = false;
     }
 
     // The interrupt status, as in JDK 21 (a field of the Thread object). interrupt0 tells the

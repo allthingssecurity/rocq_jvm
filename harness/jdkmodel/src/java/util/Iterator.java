@@ -13,7 +13,7 @@ public interface Iterator<E> {
 
     /** Javadoc: the default implementation throws UnsupportedOperationException. */
     default void remove() {
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException("remove");
     }
 
     /** Javadoc: performs the action for each remaining element until all have been processed. */

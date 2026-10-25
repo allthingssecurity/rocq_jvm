@@ -148,6 +148,36 @@ what a run does when no VirtualMachineError occurs, which is all a program can r
   output that depends on identity hash values is not comparable with HotSpot; the java.util models stay STUCK where
   an iteration order would depend on them (HashMap / ConcurrentHashMap tree-bin tie-breaks).
 
+## 5d. Per-run seeds and the default charset
+- Values the JDK draws once per run from outside the program are parameters of the environment:
+  `jenv.j_seed n` (read by the model classes through the native `java.util.ModelEnv.seed(n)`).
+  `j_seed 0` is the SALT32L of `java.util.ImmutableCollections`, which fixes the iteration order of
+  `Set.of`/`Map.of` (and of everything built from them, e.g. `Charset.aliases()`) for the run; HotSpot
+  takes it from `System.nanoTime()` at startup. As with `j_ihash`, a theorem fixes or quantifies over it.
+  The drivers take `MODEL_SEED<n>` from the environment (default a fixed value), so set/map iteration
+  orders of immutable collections are not comparable with HotSpot and the tests compare them sorted.
+- `Charset.defaultCharset()` is UTF-8 (JDK 18+, unless the JVM runs with `-Dfile.encoding=COMPAT`).
+
+## 5e. Model classes added in the second batch
+- `java.util.ImmutableCollections` (List12/ListN/SubList/Set12/SetN/Map1/MapN, KeyValueHolder): JDK 21's
+  classes, names, null checks (with HotSpot's helpful NPE messages for the JDK's implicit null checks),
+  duplicate errors and the salt-driven iteration of SetN/MapN.
+- `java.util.stream` (sequential pipelines with the JDK's push protocol and stream flags), `Collectors`,
+  `Optional*`, `StringJoiner`, `java.util.function` (all interfaces and their default methods).
+- `java.util.concurrent`: `CopyOnWriteArrayList/Set`, `ConcurrentLinkedQueue/Deque` (removed nodes stay
+  in the chain and are skipped: the same traversals as the JDK's lazily unlinked chains),
+  `CompletableFuture` (the JDK's dependent stack and claiming, monitors instead of CAS; the default async
+  executor is host-dependent in the JDK, so reading its threads' names/daemon status is STUCK),
+  `StampedLock` (the JDK's stamp encoding, reader groups and barging).
+- `java.nio.charset.Charset`, `StandardCharsets`, `sun.nio.cs.{UTF_8, ISO_8859_1, US_ASCII, UTF_16,
+  UTF_16BE, UTF_16LE}` and the String coding of JDK 21 (String.decodeUTF8_UTF16 and the encoders,
+  sun.nio.cs.UnicodeDecoder/Encoder with replacement); `java.io.IOException` and four subclasses.
+- In `theories/Jdk/Jdk.v`: `Throwable` (cause, initCause, suppressed exceptions, getLocalizedMessage and
+  toString dispatched to overrides), `Object.clone` of Cloneable objects (a field copy; otherwise
+  CloneNotSupportedException), `java.util.Objects` (callbacks run as bytecode), `System.arraycopy` with
+  HotSpot's checks in HotSpot's order and its messages, the String constructors and getBytes, and the
+  `Double`/`Float` boxes (no decimal conversion).
+
 ## 6. Test drivers and assumptions stated in theorems
 - `harness/camel/wal-*/WalScenario.java` and `harness/camel/cim/.../CimScenario.java` are our test drivers for the
   kernel-computed whole-class scenario theorems (`WalScenario.v`, `CimScenario.v`). The unbounded camel-wal theorems

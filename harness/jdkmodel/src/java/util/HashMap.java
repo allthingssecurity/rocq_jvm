@@ -108,9 +108,9 @@ public class HashMap<K, V> extends AbstractMap<K, V> implements Map<K, V>, Clone
     final float loadFactor;
 
     public HashMap(int initialCapacity, float loadFactor) {
-        if (initialCapacity < 0) throw new IllegalArgumentException();
+        if (initialCapacity < 0) throw new IllegalArgumentException("Illegal initial capacity: " + initialCapacity);
         if (initialCapacity > MAX_CAPACITY) initialCapacity = MAX_CAPACITY;
-        if (loadFactor <= 0 || loadFactor != loadFactor) throw new IllegalArgumentException();
+        if (loadFactor <= 0 || loadFactor != loadFactor) throw new IllegalArgumentException("Illegal load factor: " + loadFactor);
         this.loadFactor = loadFactor;
         this.threshold = tableSizeFor(initialCapacity);
     }
@@ -756,8 +756,29 @@ public class HashMap<K, V> extends AbstractMap<K, V> implements Map<K, V>, Clone
         }
     }
 
+    /** JDK: super.clone(), reinitialize(), putMapEntries(this, false). */
+    @SuppressWarnings("unchecked")
     public Object clone() {
-        throw ModelStuck.unsupported("HashMap.clone");
+        HashMap<K, V> result;
+        try {
+            result = (HashMap<K, V>) super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new InternalError(e);
+        }
+        result.reinitialize();
+        result.putMapEntries(this, false);
+        return result;
+    }
+
+    /** The state of a new map (clone, readObject). */
+    void reinitialize() {
+        table = null;
+        entrySet = null;
+        keySet = null;
+        values = null;
+        modCount = 0;
+        threshold = 0;
+        size = 0;
     }
 
     // ---- hooks for LinkedHashMap ----

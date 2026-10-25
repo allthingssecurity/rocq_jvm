@@ -33,7 +33,7 @@ while read -r dir cls meth desc opt; do
   elif [[ "${MODE:-frame}" == machine ]]; then
     nice ${MACHINE_EXE:-harness/machine_main.exe} "$dir" "$cls" "$meth" "$desc" "$in" "$FUEL" harness/work/unicode-21.txt > harness/work/$tag.md
   else
-    nice harness/model_main.exe "$f" "$meth" "$desc" "$in" "$FUEL" > harness/work/$tag.md
+    nice ${MODEL_EXE:-harness/model_main.exe} "$f" "$meth" "$desc" "$in" "$FUEL" > harness/work/$tag.md
   fi
   summary=$(python3 harness/compare.py "$in" harness/work/$tag.hs harness/work/$tag.md); ok=$?
   stuck=$(grep -c '^STUCK\|^FUEL' harness/work/$tag.md)

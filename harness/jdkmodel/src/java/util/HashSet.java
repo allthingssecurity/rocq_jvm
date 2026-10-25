@@ -66,8 +66,15 @@ public class HashSet<E> extends AbstractSet<E> implements Set<E>, Cloneable, jav
         map.clear();
     }
 
+    @SuppressWarnings("unchecked")
     public Object clone() {
-        throw ModelStuck.unsupported("HashSet.clone");
+        try {
+            HashSet<E> newSet = (HashSet<E>) super.clone();
+            newSet.map = (HashMap<E, Object>) map.clone();
+            return newSet;
+        } catch (CloneNotSupportedException e) {
+            throw new InternalError(e);
+        }
     }
 
     public Object[] toArray() {

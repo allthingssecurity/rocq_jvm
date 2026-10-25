@@ -50,7 +50,10 @@ let uenv = {
 (* identity hash codes: a fixed mix of the heap address (HotSpot's are unspecified: results that depend
    on them are not comparable) *)
 let env = { j_u = uenv; j_log_enabled = (fun _ -> false);
-            j_ihash = (fun z -> z_of_int (((int_of_z z) * 2654435761) land 0x7fffffff)) }
+            j_ihash = (fun z -> z_of_int (((int_of_z z) * 2654435761) land 0x7fffffff));
+            (* seeds the JDK draws once per run (ModelEnv.seed n); MODEL_SEED<n> overrides *)
+            j_seed = (fun n -> let v = (try int_of_string (Sys.getenv ("MODEL_SEED" ^ string_of_int (int_of_z n)))
+                                        with _ -> 0x2545F491 + 977 * (int_of_z n)) in z_of_int v) }
 
 let hex_units s =
   let n = String.length s / 4 in

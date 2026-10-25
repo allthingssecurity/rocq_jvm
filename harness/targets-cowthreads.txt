@@ -1,0 +1,4 @@
+classes/thread-tests:classes/threadmodel:classes/jdkmodel CowThreads cowAdds (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel CowThreads cowAbsent (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel CowThreads clqProdCons (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel CowThreads cldSteal (I)Ljava/lang/String;

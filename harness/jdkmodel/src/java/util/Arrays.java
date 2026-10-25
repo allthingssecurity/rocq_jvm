@@ -3,6 +3,8 @@
  * Apache-2.0; from the Javadoc: asList is a fixed-size list backed by the array, writes go through
  * to the array; toString is "[a, b]" with String.valueOf of each element, "null" for a null array;
  * equals/hashCode as List.equals/List.hashCode of the elements).
+ * stream(T[]), stream(int[]), stream(long[]) and their range forms build model stream pipelines
+ * (ORDERED, SIZED; range check as Spliterators.spliterator: ArrayIndexOutOfBoundsException).
  * The other static methods of Arrays (fill, copyOf, ...) are deliberately NOT declared here: the
  * machine resolves an invokestatic in this loaded class first and, when the method is not
  * declared, falls back to the Rocq model of java/util/Arrays (Jdk.v), so declaring only asList
@@ -12,6 +14,10 @@ package java.util;
 
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
+import java.util.stream.ModelStreams;
+import java.util.stream.Stream;
 
 public class Arrays {
     private Arrays() {
@@ -147,6 +153,35 @@ public class Arrays {
         while (i < mid) tmp[k++] = a[i++];
         while (j < hi) tmp[k++] = a[j++];
         for (int m = 0; m < k; m++) a[lo + m] = tmp[m];
+    }
+
+    // ---- stream (java.util.stream model) ----
+
+    public static <T> Stream<T> stream(T[] array) {
+        if (array == null) throw ModelStuck.unsupported("Arrays.stream(null): helpful NullPointerException message");
+        return stream(array, 0, array.length);
+    }
+
+    public static <T> Stream<T> stream(T[] array, int startInclusive, int endExclusive) {
+        return ModelStreams.ofArray(array, startInclusive, endExclusive);
+    }
+
+    public static IntStream stream(int[] array) {
+        if (array == null) throw ModelStuck.unsupported("Arrays.stream(null): helpful NullPointerException message");
+        return stream(array, 0, array.length);
+    }
+
+    public static IntStream stream(int[] array, int startInclusive, int endExclusive) {
+        return ModelStreams.ofIntArray(array, startInclusive, endExclusive);
+    }
+
+    public static LongStream stream(long[] array) {
+        if (array == null) throw ModelStuck.unsupported("Arrays.stream(null): helpful NullPointerException message");
+        return stream(array, 0, array.length);
+    }
+
+    public static LongStream stream(long[] array, int startInclusive, int endExclusive) {
+        return ModelStreams.ofLongArray(array, startInclusive, endExclusive);
     }
 
     /** The list view (java.util.Arrays$ArrayList). */

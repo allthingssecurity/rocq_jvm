@@ -6,7 +6,7 @@
 package java.util;
 
 public class TreeSet<E> extends AbstractSet<E> implements NavigableSet<E>, Cloneable, java.io.Serializable {
-    private final transient TreeMap<E, Object> m;
+    private transient TreeMap<E, Object> m;
     private static final Object PRESENT = new Object();
 
     public TreeSet() {
@@ -133,7 +133,15 @@ public class TreeSet<E> extends AbstractSet<E> implements NavigableSet<E>, Clone
         return (e == null) ? null : e.getKey();
     }
 
+    @SuppressWarnings("unchecked")
     public Object clone() {
-        throw ModelStuck.unsupported("TreeSet.clone");
+        TreeSet<E> clone;
+        try {
+            clone = (TreeSet<E>) super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new InternalError(e);
+        }
+        clone.m = new TreeMap<>(m);
+        return clone;
     }
 }

@@ -236,8 +236,24 @@ public class TreeMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, 
         size = 0;
     }
 
+    /** JDK: a copy with new entries (same order), the comparator, and modCount 0. */
+    @SuppressWarnings("unchecked")
     public Object clone() {
-        throw ModelStuck.unsupported("TreeMap.clone");
+        TreeMap<K, V> clone;
+        try {
+            clone = (TreeMap<K, V>) super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new InternalError(e);
+        }
+        Entry<K, V>[] copy = (Entry<K, V>[]) new Entry[es.length];
+        for (int i = 0; i < size; i++) copy[i] = new Entry<>(es[i].key, es[i].value);
+        clone.es = copy;
+        clone.modCount = 0;
+        clone.entrySet = null;
+        clone.navigableKeySet = null;
+        clone.keySet = null;
+        clone.values = null;
+        return clone;
     }
 
     // ---- navigation ----

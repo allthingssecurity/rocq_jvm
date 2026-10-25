@@ -109,7 +109,7 @@ public class Collections {
         }
 
         public E get(int index) {
-            throw new IndexOutOfBoundsException();
+            throw new IndexOutOfBoundsException("Index: " + index);
         }
 
         public boolean equals(Object o) {
@@ -398,7 +398,7 @@ public class Collections {
         }
 
         public E get(int index) {
-            if (index != 0) throw new IndexOutOfBoundsException();
+            if (index != 0) throw new IndexOutOfBoundsException("Index: " + index + ", Size: 1");
             return element;
         }
 

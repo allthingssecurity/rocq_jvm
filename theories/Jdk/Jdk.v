@@ -14,6 +14,7 @@ From Stdlib Require Import ZArith String Ascii List Bool Lia.
 From JVM.Core Require Import Int Instr Desc Semantics JdkTables Machine.
 From JVM.Loader Require Import ClassFile.
 From JVM.Jdk Require Import Strings.
+From JVM.Core Require Float.
 Import ListNotations.
 Open Scope string_scope.
 Open Scope bool_scope.
@@ -24,6 +25,9 @@ Record jenv := {
   j_log_enabled : string -> bool;   (** "isDebugEnabled" etc. of slf4j loggers *)
   j_ihash : Z -> Z;                 (** identity hash code of the object at a heap address (unspecified
                                         by the JVMS: a parameter, as the Unicode tables) *)
+  j_seed : Z -> Z;                  (** values the JDK draws once per run from the outside world
+                                        (java.util.ModelEnv.seed(n)): 0 = the SALT32L of the immutable
+                                        collections (Set.of/Map.of iteration order) *)
 }.
 
 (** ** Helpers *)
@@ -141,6 +145,101 @@ Definition box_model (cls name desc : string) (args : list value) (s : mstate) :
                              || String.eqb cls "java/lang/Byte" then ret_int s (z - z')
                      else ret_int s (lcmp z z')
                  | _ => MStuckModel "compareTo"
+                 end
+        | _ => MStuckModel "compareTo"
+        end
+      else MNoModel
+    end
+  | nil => MNoModel
+  end.
+
+(** ** java.lang.Double and java.lang.Float boxes (no caches: JDK 21 Double/Float.valueOf always
+    allocate), their xxxValue conversions (the JVM's d2f/d2i/...), hashCode/equals/compareTo through
+    doubleToLongBits / floatToIntBits (one canonical NaN), and the static helpers compare, isNaN,
+    isInfinite, isFinite, hashCode, the bit conversions. toString and parsing (decimal conversion)
+    are not modelled. *)
+Definition is_fbox (cls : string) : bool := String.eqb cls "java/lang/Double" || String.eqb cls "java/lang/Float".
+
+Definition fbox_bits (s : mstate) (cls : string) (v : value) : option Z :=
+  match v with
+  | VRef l => match ms_heap s l with
+              | Some (OObj c [("value", (VDouble b | VFloat b))]) => if String.eqb c cls then Some b else None
+              | _ => None
+              end
+  | _ => None
+  end.
+
+Definition signed (w : Z) (b : Z) : Z := if b <? 2 ^ (w - 1) then b else b - 2 ^ w.
+
+(** Double.compare / Float.compare *)
+Definition fcompare (dbl : bool) (a b : Z) : Z :=
+  let lt := if dbl then Float.dcmpg a b =? -1 else Float.fcmpg a b =? -1 in
+  let gt := if dbl then Float.dcmpl a b =? 1 else Float.fcmpl a b =? 1 in
+  if lt then -1 else if gt then 1
+  else let ca := signed (if dbl then 64 else 32) (Float.canon (if dbl then Float.binary64 else Float.binary32) a) in
+       let cb := signed (if dbl then 64 else 32) (Float.canon (if dbl then Float.binary64 else Float.binary32) b) in
+       if ca =? cb then 0 else if ca <? cb then -1 else 1.
+
+Definition fhash (dbl : bool) (b : Z) : Z :=
+  if dbl then let c := Float.canon Float.binary64 b in wrap32 (Z.lxor c (Z.shiftr c 32))
+  else wrap32 (Float.canon Float.binary32 b).
+
+Definition fbox_model (cls name desc : string) (args : list value) (s : mstate) : model_result :=
+  let dbl := String.eqb cls "java/lang/Double" in
+  let fmt := if dbl then Float.binary64 else Float.binary32 in
+  let mk := fun b => if dbl then VDouble b else VFloat b in
+  let key := name ++ desc in
+  let pd := if dbl then "D" else "F" in
+  if String.eqb key ("valueOf(" ++ pd ++ ")L" ++ cls ++ ";") then
+    match args with [(VDouble b | VFloat b)] => ret_new s (OObj cls [("value", mk b)]) | _ => MStuckModel "valueOf" end
+  else if String.eqb key ("compare(" ++ pd ++ pd ++ ")I") then
+    match args with [(VDouble a | VFloat a); (VDouble b | VFloat b)] => ret_int s (fcompare dbl a b) | _ => MStuckModel "compare" end
+  else if String.eqb key ("isNaN(" ++ pd ++ ")Z") then
+    match args with [(VDouble a | VFloat a)] => ret_bool s (Float.is_nan fmt a) | _ => MStuckModel "isNaN" end
+  else if String.eqb key ("isInfinite(" ++ pd ++ ")Z") then
+    match args with [(VDouble a | VFloat a)] => ret_bool s (Float.is_inf fmt a) | _ => MStuckModel "isInfinite" end
+  else if String.eqb key ("isFinite(" ++ pd ++ ")Z") then
+    match args with [(VDouble a | VFloat a)] => ret_bool s (Float.is_finite fmt a) | _ => MStuckModel "isFinite" end
+  else if String.eqb key ("hashCode(" ++ pd ++ ")I") then
+    match args with [(VDouble a | VFloat a)] => ret_int s (fhash dbl a) | _ => MStuckModel "hashCode" end
+  else if String.eqb key "doubleToLongBits(D)J" then
+    match args with [VDouble a] => MOk (Some (VLong (signed 64 (Float.canon fmt a)))) s | _ => MStuckModel "doubleToLongBits" end
+  else if String.eqb key "doubleToRawLongBits(D)J" then
+    match args with [VDouble a] => MOk (Some (VLong (signed 64 a))) s | _ => MStuckModel "doubleToRawLongBits" end
+  else if String.eqb key "longBitsToDouble(J)D" then
+    match args with [VLong a] => MOk (Some (VDouble (a mod 2 ^ 64))) s | _ => MStuckModel "longBitsToDouble" end
+  else if String.eqb key "floatToIntBits(F)I" then
+    match args with [VFloat a] => ret_int s (signed 32 (Float.canon fmt a)) | _ => MStuckModel "floatToIntBits" end
+  else if String.eqb key "floatToRawIntBits(F)I" then
+    match args with [VFloat a] => ret_int s (signed 32 a) | _ => MStuckModel "floatToRawIntBits" end
+  else if String.eqb key "intBitsToFloat(I)F" then
+    match args with [VInt a] => MOk (Some (VFloat (a mod 2 ^ 32))) s | _ => MStuckModel "intBitsToFloat" end
+  else
+  match args with
+  | this :: more =>
+    match fbox_bits s cls this with
+    | None => MNoModel
+    | Some b =>
+      if String.eqb key "doubleValue()D" then MOk (Some (VDouble (if dbl then b else Float.f2d b))) s
+      else if String.eqb key "floatValue()F" then MOk (Some (VFloat (if dbl then Float.d2f b else b))) s
+      else if String.eqb key "intValue()I" then ret_int s (if dbl then Float.d2i b else Float.f2i b)
+      else if String.eqb key "longValue()J" then MOk (Some (VLong (if dbl then Float.d2l b else Float.f2l b))) s
+      else if String.eqb key "shortValue()S" then ret_int s (i2s (if dbl then Float.d2i b else Float.f2i b))
+      else if String.eqb key "byteValue()B" then ret_int s (i2b (if dbl then Float.d2i b else Float.f2i b))
+      else if String.eqb key "isNaN()Z" then ret_bool s (Float.is_nan fmt b)
+      else if String.eqb key "isInfinite()Z" then ret_bool s (Float.is_inf fmt b)
+      else if String.eqb key "hashCode()I" then ret_int s (fhash dbl b)
+      else if String.eqb key "equals(Ljava/lang/Object;)Z" then
+        match more with
+        | [o] => ret_bool s (match fbox_bits s cls o with Some b' => Z.eqb (Float.canon fmt b) (Float.canon fmt b') | None => false end)
+        | _ => MStuckModel "equals"
+        end
+      else if String.eqb name "compareTo" then
+        match more with
+        | [VNull] => MThrow NPE
+        | [o] => match fbox_bits s cls o with
+                 | Some b' => ret_int s (fcompare dbl b b')
+                 | None => MThrow "java/lang/ClassCastException"
                  end
         | _ => MStuckModel "compareTo"
         end
@@ -464,6 +563,22 @@ Definition model_code (vs : list value) (pre body post : list instr) (wrap : boo
      c_instrs := number (app pre (app body (app post (if wrap then handler else nil)))) 0;
      c_handlers := if wrap then [{| h_start := b0; h_end := b1; h_pc := hp; h_catch := Some "java/lang/Throwable" |}] else nil |}.
 
+Definition om (c n d : string) (iface : bool) : methodref :=
+  {| mr_class := c; mr_name := n; mr_desc := d; mr_interface := iface |}.
+
+(** [new NullPointerException(<local 1 or null>)]; throw it. *)
+Definition npe_code (vs : list value) (msg_local : option Z) : code :=
+  model_code vs nil
+    (New NPE :: Dup :: (match msg_local with Some i => Load KA i | None => AconstNull end) ::
+     [Invoke InvSpecial (om NPE "<init>" "(Ljava/lang/String;)V" false); Athrow]) nil false.
+
+(** Throw a new exception of class [cls] with this message (its (String) constructor, run as bytecode). *)
+Definition throw_msg (cls : string) (msg : list Z) (s : mstate) : model_result :=
+  let (l, s') := alloc s (OStr msg) in
+  MFrame None (model_code [VRef l] nil
+    [New cls; Dup; Load KA 0; Invoke InvSpecial (om cls "<init>" "(Ljava/lang/String;)V" false); Athrow] nil false)
+    [VRef l] None s'.
+
 (** static String.valueOf(...) *)
 Definition string_static (name desc : string) (args : list value) (s : mstate) : model_result :=
   let key := name ++ desc in
@@ -519,7 +634,97 @@ Definition string_static (name desc : string) (args : list value) (s : mstate) :
           [Return (Some KA)] false) args (Some (TArr (TRef "java/lang/String"))) s
     | _ => MStuckModel "split args"
     end else
-  if String.eqb key "valueOf(I)Ljava/lang/String;" then
+  (* String constructors (the object made by [new java/lang/String] becomes a String) *)
+  let init_units := fun (this : value) (u : list Z) =>
+    match this with VRef l => MOk None (set_heap s l (OStr u)) | _ => MStuckModel "String.<init> receiver" end in
+  let chars_of := fun (v : value) => match v with
+                                     | VRef l => match ms_heap s l with Some (OArr TChar es) => Some es | _ => None end
+                                     | _ => None end in
+  let units_of_chars := fun (es : list value) => map (fun v => match v with VInt c => c | _ => 0 end) es in
+  let range_fail := fun (o n len : Z) =>
+    throw_msg "java/lang/StringIndexOutOfBoundsException"
+      (app (ascii_units "Range [") (app (z_units o) (app (ascii_units ", ") (app (z_units o) (app (ascii_units " + ")
+        (app (z_units n) (app (ascii_units ") out of bounds for length ") (z_units len)))))))) s in
+  let npe_msg := fun (m : string) => let (ml, s') := alloc s (OStr (ascii_units m)) in
+                                     MFrame None (npe_code [VNull; VRef ml] (Some 1)) [VNull; VRef ml] None s' in
+  let sub_chars := fun (es : list value) (o n : Z) => units_of_chars (firstn (Z.to_nat n) (skipn (Z.to_nat o) es)) in
+  (* the byte[] constructors and getBytes: java.nio.charset.Charset's helpers, run as bytecode *)
+  let loads := fun (vs : list value) =>
+    (fix go (vs : list value) (i : Z) : list instr :=
+       match vs with
+       | nil => nil
+       | VInt _ :: r => Load KI i :: go r (i + 1)
+       | _ :: r => Load KA i :: go r (i + 1)
+       end) vs 0 in
+  let params := fun (d : string) => match index 0 ")" d with Some k => substring 1 (k - 1) d | None => "" end in
+  let csm := fun n d => {| mr_class := "java/nio/charset/Charset"; mr_name := n; mr_desc := d; mr_interface := false |} in
+  if String.eqb name "<init>" then
+    match args with
+    | this :: rest =>
+      if String.eqb desc "()V" then init_units this nil
+      else if String.eqb desc "(Ljava/lang/String;)V" then
+        match rest with
+        | [VNull] => npe_msg "Cannot read field ""value"" because ""original"" is null"
+        | [v] => match str_of s v with Some u => init_units this u | None => MStuckModel "String(String)" end
+        | _ => MStuckModel "String(String)"
+        end
+      else if String.eqb desc "(Ljava/lang/StringBuilder;)V" then
+        match rest with
+        | [VNull] => npe_msg "Cannot invoke ""java.lang.AbstractStringBuilder.getValue()"" because ""asb"" is null"
+        | [VRef b] => match ms_heap s b with Some (OSb u) => init_units this u | _ => MStuckModel "String(StringBuilder)" end
+        | _ => MStuckModel "String(StringBuilder)"
+        end
+      else if String.eqb desc "([C)V" then
+        match rest with
+        | [VNull] => npe_msg "Cannot read the array length because ""value"" is null"
+        | [v] => match chars_of v with Some es => init_units this (units_of_chars es) | None => MStuckModel "String(char[])" end
+        | _ => MStuckModel "String(char[])"
+        end
+      else if String.eqb desc "([CII)V" then
+        match rest with
+        | [VNull; _; _] => npe_msg "Cannot read the array length because ""value"" is null"
+        | [v; VInt o; VInt n] =>
+            match chars_of v with
+            | Some es => let len := slen_v es in
+                         if (o <? 0) || (n <? 0) || (len - o <? n) then range_fail o n len
+                         else init_units this (sub_chars es o n)
+            | None => MStuckModel "String(char[], int, int)"
+            end
+        | _ => MStuckModel "String(char[], int, int)"
+        end
+      else if prefix "([B" desc then
+        MFrame None (model_code args nil
+          (app (loads args)
+            [Invoke InvStatic (csm "newString$" ("(" ++ params desc ++ ")Ljava/lang/String;"));
+             Invoke InvSpecial {| mr_class := "java/lang/String"; mr_name := "<init>"; mr_desc := "(Ljava/lang/String;)V"; mr_interface := false |}])
+          [Return None] false) args None s
+      else MNoModel
+    | nil => MNoModel
+    end
+  else if String.eqb name "getBytes" && (String.eqb desc "()[B" || String.eqb desc "(Ljava/nio/charset/Charset;)[B"
+                                         || String.eqb desc "(Ljava/lang/String;)[B") then
+    MFrame None (model_code args nil
+      (app (loads args) [Invoke InvStatic (csm "getBytes$" ("(Ljava/lang/String;" ++ params desc ++ ")[B"))])
+      [Return (Some KA)] false) args (Some (TArr TByte)) s
+  else if String.eqb key "valueOf([C)Ljava/lang/String;" || String.eqb key "copyValueOf([C)Ljava/lang/String;" then
+    match args with
+    | [VNull] => npe_msg "Cannot read the array length because ""value"" is null"
+    | [v] => match chars_of v with Some es => ret_new s (OStr (units_of_chars es)) | None => MStuckModel "valueOf(char[])" end
+    | _ => MStuckModel "valueOf(char[])"
+    end
+  else if String.eqb key "valueOf([CII)Ljava/lang/String;" || String.eqb key "copyValueOf([CII)Ljava/lang/String;" then
+    match args with
+    | [VNull; _; _] => npe_msg "Cannot read the array length because ""value"" is null"
+    | [v; VInt o; VInt n] =>
+        match chars_of v with
+        | Some es => let len := slen_v es in
+                     if (o <? 0) || (n <? 0) || (len - o <? n) then range_fail o n len
+                     else ret_new s (OStr (sub_chars es o n))
+        | None => MStuckModel "valueOf(char[], int, int)"
+        end
+    | _ => MStuckModel "valueOf(char[], int, int)"
+    end
+  else if String.eqb key "valueOf(I)Ljava/lang/String;" then
     match args with [VInt z] => ret_new s (OStr (z_units z)) | _ => MStuckModel "valueOf" end
   else if String.eqb key "valueOf(J)Ljava/lang/String;" then
     match args with [VLong z] => ret_new s (OStr (z_units z)) | _ => MStuckModel "valueOf" end
@@ -823,12 +1028,44 @@ Definition num_model (e : jenv) (cls name desc : string) (args : list value) (s 
 
 
 (** ** java.util.Objects *)
+(** Methods that call back into user code ([equals], [hashCode], [toString], a [Supplier]) or
+    throw an exception with a message run as bytecode in a frame of their own (MFrame), as the
+    JDK's own code does. *)
+
+
 Definition objects_model (name desc : string) (args : list value) (s : mstate) : model_result :=
   let key := name ++ desc in
-  if String.eqb key "requireNonNull(Ljava/lang/Object;)Ljava/lang/Object;"
-     || String.eqb key "requireNonNull(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;" then
-    match args with VNull :: _ => MThrow NPE | v :: _ => MOk (Some v) s | nil => MStuckModel "requireNonNull" end
+  let frame := fun vs body post rt => MFrame None (model_code vs nil body post false) vs rt s in
+  let objeq := Invoke InvVirtual (om "java/lang/Object" "equals" "(Ljava/lang/Object;)Z" false) in
+  if String.eqb key "requireNonNull(Ljava/lang/Object;)Ljava/lang/Object;" then
+    match args with [VNull] => MFrame None (npe_code args None) args None s | [v] => MOk (Some v) s | _ => MStuckModel "requireNonNull" end
+  else if String.eqb key "requireNonNull(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;" then
+    match args with [VNull; _] => MFrame None (npe_code args (Some 1)) args None s | [v; _] => MOk (Some v) s | _ => MStuckModel "requireNonNull" end
+  else if String.eqb key "requireNonNull(Ljava/lang/Object;Ljava/util/function/Supplier;)Ljava/lang/Object;" then
+    match args with
+    | [VNull; VNull] => MFrame None (npe_code args None) args None s
+    | [VNull; _] =>
+        frame args
+          [New NPE; Dup; Load KA 1; Invoke InvInterface (om "java/util/function/Supplier" "get" "()Ljava/lang/Object;" true);
+           Checkcast "java/lang/String"; Invoke InvSpecial (om NPE "<init>" "(Ljava/lang/String;)V" false); Athrow] nil None
+    | [v; _] => MOk (Some v) s
+    | _ => MStuckModel "requireNonNull"
+    end
+  else if String.eqb key "requireNonNullElse(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" then
+    match args with
+    | [VNull; VNull] =>
+        let (l, s') := alloc s (OStr (ascii_units "defaultObj")) in
+        MFrame None (npe_code [VNull; VRef l] (Some 1)) [VNull; VRef l] None s'
+    | [VNull; d] => MOk (Some d) s
+    | [v; _] => MOk (Some v) s
+    | _ => MStuckModel "requireNonNullElse"
+    end
+  else if String.eqb key "isNull(Ljava/lang/Object;)Z" then
+    match args with [v] => ret_bool s (match v with VNull => true | _ => false end) | _ => MStuckModel "isNull" end
+  else if String.eqb key "nonNull(Ljava/lang/Object;)Z" then
+    match args with [v] => ret_bool s (match v with VNull => false | _ => true end) | _ => MStuckModel "nonNull" end
   else if String.eqb key "equals(Ljava/lang/Object;Ljava/lang/Object;)Z" then
+    (* (a == b) || (a != null && a.equals(b)) *)
     match args with
     | [a; b] =>
       if ref_eq a b then ret_bool s true
@@ -836,17 +1073,7 @@ Definition objects_model (name desc : string) (args : list value) (s : mstate) :
            | VNull => ret_bool s false
            | _ => match str_of s a with
                   | Some ua => ret_bool s (match str_of s b with Some ub => units_eqb ua ub | None => false end)
-                  | None =>
-                      match a with
-                      | VRef la => match ms_heap s la with
-                                   | Some (OObj c [("value", wa)]) =>
-                                       if is_box_class c then
-                                         ret_bool s (match box_value s c b with Some wb => value_eqb wa wb | None => false end)
-                                       else MStuckModel "Objects.equals: equals() callback"
-                                   | _ => MStuckModel "Objects.equals: equals() callback"
-                                   end
-                      | _ => MStuckModel "Objects.equals: equals() callback"
-                      end
+                  | None => frame args [Load KA 0; Load KA 1; objeq] [Return (Some KI)] (Some TBool)
                   end
            end
     | _ => MStuckModel "Objects.equals"
@@ -854,8 +1081,54 @@ Definition objects_model (name desc : string) (args : list value) (s : mstate) :
   else if String.eqb key "hashCode(Ljava/lang/Object;)I" then
     match args with
     | [VNull] => ret_int s 0
-    | [v] => match str_of s v with Some u => ret_int s (str_hash u) | None => MStuckModel "Objects.hashCode callback" end
+    | [v] => match str_of s v with
+             | Some u => ret_int s (str_hash u)
+             | None => frame args [Load KA 0; Invoke InvVirtual (om "java/lang/Object" "hashCode" "()I" false)]
+                         [Return (Some KI)] (Some TInt)
+             end
     | _ => MStuckModel "Objects.hashCode"
+    end
+  else if String.eqb key "hash([Ljava/lang/Object;)I" then
+    (* Arrays.hashCode(values) *)
+    match args with
+    | [_] => frame args [Load KA 0; Invoke InvStatic (om "java/util/Arrays" "hashCode" "([Ljava/lang/Object;)I" false)]
+               [Return (Some KI)] (Some TInt)
+    | _ => MStuckModel "Objects.hash"
+    end
+  else if String.eqb key "toString(Ljava/lang/Object;)Ljava/lang/String;" then
+    (* String.valueOf(o) *)
+    match args with
+    | [_] => frame args [Load KA 0; Invoke InvStatic (om "java/lang/String" "valueOf" "(Ljava/lang/Object;)Ljava/lang/String;" false)]
+               [Return (Some KA)] (Some (TRef "java/lang/String"))
+    | _ => MStuckModel "Objects.toString"
+    end
+  else if String.eqb key "toString(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/String;" then
+    match args with
+    | [VNull; d] => MOk (Some d) s
+    | [_; _] => frame args [Load KA 0; Invoke InvVirtual (om "java/lang/Object" "toString" "()Ljava/lang/String;" false)]
+                  [Return (Some KA)] (Some (TRef "java/lang/String"))
+    | _ => MStuckModel "Objects.toString"
+    end
+  else if String.eqb key "compare(Ljava/lang/Object;Ljava/lang/Object;Ljava/util/Comparator;)I" then
+    (* (a == b) ? 0 : c.compare(a, b) *)
+    match args with
+    | [a; b; _] => if ref_eq a b then ret_int s 0
+                   else frame args [Load KA 2; Load KA 0; Load KA 1;
+                                    Invoke InvInterface (om "java/util/Comparator" "compare" "(Ljava/lang/Object;Ljava/lang/Object;)I" true)]
+                          [Return (Some KI)] (Some TInt)
+    | _ => MStuckModel "Objects.compare"
+    end
+  else if String.eqb key "checkIndex(II)I" then
+    (* Preconditions.outOfBounds: IndexOutOfBoundsException("Index i out of bounds for length n") *)
+    match args with
+    | [VInt i; VInt n] =>
+        if (0 <=? i) && (i <? n) then ret_int s i
+        else let (l, s') := alloc s (OStr (app (ascii_units "Index ") (app (z_units i) (app (ascii_units " out of bounds for length ") (z_units n))))) in
+             MFrame None (model_code [VInt i; VInt n; VRef l] nil
+               [New "java/lang/IndexOutOfBoundsException"; Dup; Load KA 2;
+                Invoke InvSpecial (om "java/lang/IndexOutOfBoundsException" "<init>" "(Ljava/lang/String;)V" false); Athrow] nil false)
+               [VInt i; VInt n; VRef l] None s'
+    | _ => MStuckModel "checkIndex"
     end
   else MNoModel.
 
@@ -874,18 +1147,57 @@ Definition prim_type (t : jtype) : bool := match t with TRef _ | TArr _ => false
     bad ranges; copying as if through a temporary (overlap-safe).  For
     reference arrays whose element types differ, elements are checked one by
     one and the copy stops with ArrayStoreException at the first bad one. *)
+
+(** HotSpot's names in arraycopy messages: [int], ..., or [object array]. *)
+Definition acopy_kind (t : jtype) : list Z :=
+  ascii_units (match t with
+               | TBool => "boolean" | TByte => "byte" | TChar => "char" | TShort => "short" | TInt => "int"
+               | TLong => "long" | TFloat => "float" | TDouble => "double" | _ => "object array" end).
+
+Definition elem_name (t : jtype) : list Z :=
+  class_name_units (match t with TRef c => c | _ => type_desc t end).
+
+(** System.arraycopy with HotSpot's checks in HotSpot's order and its exception messages
+    (TypeArrayKlass/ObjArrayKlass::copy_array, JDK 21). *)
 Definition arraycopy (p : program) (args : list value) (s : mstate) : model_result :=
+  let au := ascii_units in
+  let ase := fun m => throw_msg "java/lang/ArrayStoreException" (app (au "arraycopy: ") m) s in
+  let aioobe := fun m => throw_msg "java/lang/ArrayIndexOutOfBoundsException" (app (au "arraycopy: ") m) s in
+  let dims := fun (t : jtype) (n : Z) => app (acopy_kind t) (app (au "[") (app (z_units n) (au "]"))) in
   match args with
   | [src; VInt sp; dst; VInt dp; VInt n] =>
     match src, dst with
-    | VNull, _ | _, VNull => MThrow NPE
+    | VNull, _ | _, VNull => MFrame None (npe_code [] None) [] None s
     | _, _ =>
-      match arr_of s src, arr_of s dst with
-      | Some (_, ts, es), Some (ld, td, ed) =>
-        if negb (Bool.eqb (prim_type ts) (prim_type td)) then MThrow "java/lang/ArrayStoreException"
-        else if prim_type ts && negb (String.eqb (type_desc ts) (type_desc td)) then MThrow "java/lang/ArrayStoreException"
-        else if (sp <? 0) || (dp <? 0) || (n <? 0) || (slen_v es <? sp + n) || (slen_v ed <? dp + n)
-        then MThrow "java/lang/ArrayIndexOutOfBoundsException"
+      match arr_of s src with
+      | None =>
+          match src with
+          | VRef l => match option_map runtime_type (ms_heap s l) with
+                      | Some (TRef c) => ase (app (au "source type ") (app (class_name_units c) (au " is not an array")))
+                      | _ => MStuckModel "arraycopy: source"
+                      end
+          | _ => MStuckModel "arraycopy: source"
+          end
+      | Some (_, ts, es) =>
+      match arr_of s dst with
+      | None =>
+          match dst with
+          | VRef l => match option_map runtime_type (ms_heap s l) with
+                      | Some (TRef c) => ase (app (au "destination type ") (app (class_name_units c) (au " is not an array")))
+                      | _ => MStuckModel "arraycopy: destination"
+                      end
+          | _ => MStuckModel "arraycopy: destination"
+          end
+      | Some (ld, td, ed) =>
+        let sl := slen_v es in
+        let dl := slen_v ed in
+        if negb (Bool.eqb (prim_type ts) (prim_type td)) || (prim_type ts && negb (String.eqb (type_desc ts) (type_desc td))) then
+          ase (app (au "type mismatch: can not copy ") (app (acopy_kind ts) (app (au "[] into ") (app (acopy_kind td) (au "[]")))))
+        else if sp <? 0 then aioobe (app (au "source index ") (app (z_units sp) (app (au " out of bounds for ") (dims ts sl))))
+        else if dp <? 0 then aioobe (app (au "destination index ") (app (z_units dp) (app (au " out of bounds for ") (dims td dl))))
+        else if n <? 0 then aioobe (app (au "length ") (app (z_units n) (au " is negative")))
+        else if sl <? sp + n then aioobe (app (au "last source index ") (app (z_units (sp + n)) (app (au " out of bounds for ") (dims ts sl))))
+        else if dl <? dp + n then aioobe (app (au "last destination index ") (app (z_units (dp + n)) (app (au " out of bounds for ") (dims td dl))))
         else
           let chunk := firstn (Z.to_nat n) (skipn (Z.to_nat sp) es) in
           (* reference arrays: element-wise store check *)
@@ -913,9 +1225,21 @@ Definition arraycopy (p : program) (args : list value) (s : mstate) : model_resu
               let copied := firstn k chunk in
               let ed' := app (firstn (Z.to_nat dp) ed) (app copied (skipn (Z.to_nat dp + k) ed)) in
               let s' := set_heap s ld (OArr td ed') in
-              if all_ok then MOk None s' else MThrow "java/lang/ArrayStoreException"
+              let tname := fun (t : jtype) => match t with TRef c => c | _ => type_desc t end in
+              if all_ok then MOk None s'
+              else match assignable p 64 td (tname ts) with
+                   | Some false =>
+                       throw_msg "java/lang/ArrayStoreException"
+                         (app (au "arraycopy: type mismatch: can not copy ")
+                           (app (elem_name ts) (app (au "[] into ") (app (elem_name td) (au "[]"))))) s'
+                   | Some true =>
+                       throw_msg "java/lang/ArrayStoreException"
+                         (app (au "arraycopy: element type mismatch: can not cast one of the elements of ")
+                           (app (elem_name ts) (app (au "[] to the type of the destination array, ") (elem_name td)))) s'
+                   | None => MStuckModel "arraycopy: cannot decide element type"
+                   end
           end
-      | _, _ => MThrow "java/lang/ArrayStoreException"
+      end
       end
     end
   | _ => MStuckModel "arraycopy args"
@@ -1819,7 +2143,7 @@ Definition sync_frame_holds (s : mstate) (l : Z) : bool :=
      else match f_locals (cf_frame f) with VRef t :: _ => (t =? l)%Z | _ => false end)) (ms_frames s).
 
 (** ** java.lang.Object (methods reached on objects of loaded classes) and clone of arrays *)
-Definition object_model (e : jenv) (name desc : string) (args : list value) (s : mstate) : model_result :=
+Definition object_model (p : program) (e : jenv) (name desc : string) (args : list value) (s : mstate) : model_result :=
   match args with
   | this :: rest =>
     if String.eqb name "hashCode" && String.eqb desc "()I" then
@@ -1863,44 +2187,204 @@ Definition object_model (e : jenv) (name desc : string) (args : list value) (s :
     else if String.eqb name "clone" && String.eqb desc "()Ljava/lang/Object;" then
       match arr_of s this with
       | Some (_, t, es) => ret_new s (OArr t es)
-      | None => MStuckModel "clone of a non-array (Cloneable objects not modelled yet)"
+      | None =>
+          (* Object.clone: a field-by-field copy if the class implements Cloneable, else
+             CloneNotSupportedException(class name) *)
+          match this with
+          | VRef l =>
+              match ms_heap s l with
+              | Some (OObj c fs) =>
+                  match assignable p 64 (TRef c) "java/lang/Cloneable" with
+                  | Some true => ret_new s (OObj c fs)
+                  | Some false => throw_msg "java/lang/CloneNotSupportedException" (class_name_units c) s
+                  | None => MStuckModel "clone: cannot decide Cloneable"
+                  end
+              | _ => MStuckModel "clone of this object"
+              end
+          | _ => MStuckModel "clone"
+          end
       end
     else MNoModel
   | nil => MNoModel
   end.
 
 
-(** Constructors of the java.lang exceptions keep the message (field "detailMessage", as the
-    VM-created exceptions of Machine.throw_msg); causes and stack traces are not modelled. The
-    (Throwable) constructor takes cause.toString() as message, modelled only for a null cause. *)
+(** Throwable (JDK 21, without stack traces). The fields of an exception object:
+    "detailMessage"; "cause" (the object itself while the cause is not initialised, as the
+    JDK's [cause = this]; absent for exceptions the machine creates: also not initialised);
+    "suppressed" (absent: none yet; VNull: suppression disabled; else a Throwable[]).
+    The (Throwable) constructor's message is cause.toString(), computed as bytecode by
+    calling the (String, Throwable) constructor with it. *)
+Definition set_field (fs : list (string * value)) (k : string) (v : value) : list (string * value) :=
+  (k, v) :: filter (fun kv => negb (String.eqb (fst kv) k)) fs.
 Definition set_detail (fs : list (string * value)) (v : value) : list (string * value) :=
-  ("detailMessage", v) :: filter (fun kv => negb (String.eqb (fst kv) "detailMessage")) fs.
+  set_field fs "detailMessage" v.
 
-Definition throwable_init (desc : string) (args : list value) (s : mstate) : model_result :=
+Definition THR := "java/lang/Throwable".
+Definition SB := "java/lang/StringBuilder".
+
+Definition throwable_init (cls desc : string) (args : list value) (s : mstate) : model_result :=
   match args with
   | VRef l :: rest =>
     match ms_heap s l with
     | Some (OObj c fs) =>
-      if String.eqb desc "()V" then MOk None (set_heap s l (OObj c (set_detail fs VNull)))
+      let put := fun m cause => MOk None (set_heap s l (OObj c (set_field (set_detail fs m) "cause" cause))) in
+      if String.eqb desc "()V" then put VNull (VRef l)
       else if String.eqb desc "(Ljava/lang/Throwable;)V" then
         match rest with
-        | [VNull] => MOk None (set_heap s l (OObj c (set_detail fs VNull)))
+        | [VNull] => put VNull VNull
         | [t] => if String.eqb c "java/lang/reflect/InvocationTargetException"
                  then (* InvocationTargetException(target): super((Throwable) null), the target kept *)
-                      MOk None (set_heap s l (OObj c (("target", t) :: set_detail fs VNull)))
-                 else MStuckModel "Throwable(cause): message is cause.toString()"
+                      MOk None (set_heap s l (OObj c (("target", t) :: set_field (set_detail fs VNull) "cause" VNull)))
+                 else (* this(cause.toString(), cause) *)
+                      MFrame None (model_code args nil
+                        [Load KA 0; Load KA 1;
+                         Invoke InvVirtual (om "java/lang/Object" "toString" "()Ljava/lang/String;" false);
+                         Load KA 1;
+                         Invoke InvSpecial (om cls "<init>" "(Ljava/lang/String;Ljava/lang/Throwable;)V" false)]
+                        [Return None] false) args None s
         | _ => MStuckModel "Throwable(cause)"
         end
+      else if String.eqb desc "(Ljava/lang/String;Ljava/lang/Throwable;)V" then
+        match rest with
+        | [m; cause] => match m, cause with
+                        | (VNull | VRef _), (VNull | VRef _) => put m cause
+                        | _, _ => MStuckModel "Throwable.<init>"
+                        end
+        | _ => MStuckModel "Throwable.<init>"
+        end
+      else if String.eqb desc "(Ljava/lang/String;Ljava/lang/Throwable;ZZ)V" then
+        match rest with
+        | [m; cause; VInt supp; _] =>
+            match m, cause with
+            | (VNull | VRef _), (VNull | VRef _) =>
+                let fs' := set_field (set_detail fs m) "cause" cause in
+                MOk None (set_heap s l (OObj c (if Z.eqb supp 0 then set_field fs' "suppressed" VNull else fs')))
+            | _, _ => MStuckModel "Throwable.<init>"
+            end
+        | _ => MStuckModel "Throwable.<init>"
+        end
       else match rest with
-           | m :: _ => match m with
-                       | VNull | VRef _ => MOk None (set_heap s l (OObj c (set_detail fs m)))
-                       | _ => MStuckModel "Throwable.<init>"
-                       end
-           | nil => MStuckModel "Throwable.<init>"
+           | [m] => match m with
+                    | VNull | VRef _ => put m (VRef l)
+                    | _ => MStuckModel "Throwable.<init>"
+                    end
+           | _ => MStuckModel "Throwable.<init>"
            end
     | _ => MOk None s
     end
   | _ => MOk None s
+  end.
+
+(** [new cls(msg, cause)] thrown, as bytecode; [msg] is an ASCII literal, [cause] local 0. *)
+Definition throw_with_cause (cls : string) (msg : string) (vs : list value) (cause_local : Z) : code :=
+  model_code vs nil
+    [New cls; Dup; Ldc (LdcString msg); Load KA cause_local;
+     Invoke InvSpecial (om cls "<init>" "(Ljava/lang/String;Ljava/lang/Throwable;)V" false); Athrow] nil false.
+
+(** Throwable's methods on an exception object (receiver first in [args]). *)
+Definition throwable_model (name desc : string) (args : list value) (s : mstate) : model_result :=
+  let key := name ++ desc in
+  match args with
+  | VRef l :: rest =>
+    match ms_heap s l with
+    | Some (OObj c fs) =>
+      if String.eqb key "getCause()Ljava/lang/Throwable;" || String.eqb key "getTargetException()Ljava/lang/Throwable;" then
+        match assoc "target" fs with
+        | Some v => MOk (Some v) s
+        | None => match assoc "cause" fs with
+                  | Some (VRef x) => MOk (Some (if Z.eqb x l then VNull else VRef x)) s
+                  | Some v => MOk (Some v) s
+                  | None => MOk (Some VNull) s
+                  end
+        end
+      else if String.eqb key "initCause(Ljava/lang/Throwable;)Ljava/lang/Throwable;" then
+        match rest with
+        | [cause] =>
+          let uninit := match assoc "cause" fs with None => true | Some (VRef x) => Z.eqb x l | Some _ => false end in
+          if negb uninit then
+            (* IllegalStateException("Can't overwrite cause with " + Objects.toString(cause, "a null"), this) *)
+            MFrame None (model_code args nil
+              [New "java/lang/IllegalStateException"; Dup;
+               New SB; Dup; Ldc (LdcString "Can't overwrite cause with ");
+               Invoke InvSpecial (om SB "<init>" "(Ljava/lang/String;)V" false);
+               Load KA 1; Ldc (LdcString "a null");
+               Invoke InvStatic (om "java/util/Objects" "toString" "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/String;" false);
+               Invoke InvVirtual (om SB "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;" false);
+               Invoke InvVirtual (om SB "toString" "()Ljava/lang/String;" false);
+               Load KA 0;
+               Invoke InvSpecial (om "java/lang/IllegalStateException" "<init>" "(Ljava/lang/String;Ljava/lang/Throwable;)V" false);
+               Athrow] nil false) args None s
+          else if ref_eq cause (VRef l) then
+            MFrame None (throw_with_cause "java/lang/IllegalArgumentException" "Self-causation not permitted" args 0) args None s
+          else match cause with
+               | VNull | VRef _ => MOk (Some (VRef l)) (set_heap s l (OObj c (set_field fs "cause" cause)))
+               | _ => MStuckModel "initCause"
+               end
+        | _ => MStuckModel "initCause"
+        end
+      else if String.eqb key "addSuppressed(Ljava/lang/Throwable;)V" then
+        match rest with
+        | [x] =>
+          if ref_eq x (VRef l) then
+            MFrame None (throw_with_cause "java/lang/IllegalArgumentException" "Self-suppression not permitted" [x] 0) [x] None s
+          else match x with
+               | VNull =>
+                   let (m, s') := alloc s (OStr (ascii_units "Cannot suppress a null exception.")) in
+                   MFrame None (npe_code [VNull; VRef m] (Some 1)) [VNull; VRef m] None s'
+               | VRef _ =>
+                   match assoc "suppressed" fs with
+                   | Some VNull => MOk None s
+                   | Some (VRef a) =>
+                       match ms_heap s a with
+                       | Some (OArr t es) => let (a', s') := alloc s (OArr t (app es [x])) in
+                                             MOk None (set_heap s' l (OObj c (set_field fs "suppressed" (VRef a'))))
+                       | _ => MStuckModel "addSuppressed"
+                       end
+                   | Some _ => MStuckModel "addSuppressed"
+                   | None => let (a', s') := alloc s (OArr (TRef THR) [x]) in
+                             MOk None (set_heap s' l (OObj c (set_field fs "suppressed" (VRef a'))))
+                   end
+               | _ => MStuckModel "addSuppressed"
+               end
+        | _ => MStuckModel "addSuppressed"
+        end
+      else if String.eqb key "getSuppressed()[Ljava/lang/Throwable;" then
+        match assoc "suppressed" fs with
+        | Some (VRef a) => match ms_heap s a with
+                           | Some (OArr t es) => ret_new s (OArr t es)
+                           | _ => MStuckModel "getSuppressed"
+                           end
+        | _ => ret_new s (OArr (TRef THR) nil)
+        end
+      else if String.eqb key "fillInStackTrace()Ljava/lang/Throwable;" then MOk (Some (VRef l)) s
+      else if String.eqb key "getLocalizedMessage()Ljava/lang/String;" then
+        (* getMessage(), dispatched (a subclass may override it) *)
+        MFrame None (model_code [VRef l] nil [Load KA 0; Invoke InvVirtual (om THR "getMessage" "()Ljava/lang/String;" false)]
+                       [Return (Some KA)] false) [VRef l] (Some (TRef "java/lang/String")) s
+      else if String.eqb key "toString()Ljava/lang/String;" then
+        (* s = getClass().getName(); m = getLocalizedMessage(); m != null ? s + ": " + m : s *)
+        MFrame None (model_code [VRef l; VNull; VNull] nil
+          [Load KA 0; Invoke InvVirtual (om "java/lang/Object" "getClass" "()Ljava/lang/Class;" false);
+           Invoke InvVirtual (om "java/lang/Class" "getName" "()Ljava/lang/String;" false); Store KA 1;
+           Load KA 0; Invoke InvVirtual (om THR "getLocalizedMessage" "()Ljava/lang/String;" false); Store KA 2;
+           Load KA 2; IfNull true 19;
+           New SB; Dup; Load KA 1; Invoke InvSpecial (om SB "<init>" "(Ljava/lang/String;)V" false);
+           Ldc (LdcString ": "); Invoke InvVirtual (om SB "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;" false);
+           Load KA 2; Invoke InvVirtual (om SB "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;" false);
+           Invoke InvVirtual (om SB "toString" "()Ljava/lang/String;" false);
+           Return (Some KA);
+           Load KA 1; Return (Some KA)] nil false)
+          [VRef l; VNull; VNull] (Some (TRef "java/lang/String")) s
+      else if String.eqb key "getMessage()Ljava/lang/String;" then
+        match assoc "detailMessage" fs with
+        | Some v => MOk (Some v) s
+        | None => MStuckModel "exception message not modelled"
+        end
+      else MNoModel
+    | _ => MNoModel
+    end
+  | _ => MNoModel
   end.
 
 (** ** The JDK model *)
@@ -1910,7 +2394,8 @@ Definition jdk_model (p : program) (e : jenv) : model :=
     if String.eqb name "<init>" && is_builtin_throwable cls
        && (String.eqb desc "()V" || String.eqb desc "(Ljava/lang/String;)V"
            || String.eqb desc "(Ljava/lang/String;Ljava/lang/Throwable;)V"
-           || String.eqb desc "(Ljava/lang/Throwable;)V") then throwable_init desc args s
+           || String.eqb desc "(Ljava/lang/Throwable;)V"
+           || String.eqb desc "(Ljava/lang/String;Ljava/lang/Throwable;ZZ)V") then throwable_init cls desc args s
     else if (String.eqb cls "java/lang/Record" || String.eqb cls "java/lang/Number")
             && String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
     (* Comparable.compareTo(Object) on a String or a box (the bridge method: the argument is cast
@@ -1942,6 +2427,7 @@ Definition jdk_model (p : program) (e : jenv) : model :=
                                      end
                         | _ => MStuckModel "compareTo: argument"
                         end
+                      else if is_fbox c then fbox_model c "compareTo" desc args s
                       else MNoModel
                   | _ => MNoModel
                   end
@@ -1956,55 +2442,16 @@ Definition jdk_model (p : program) (e : jenv) : model :=
       let d := if String.eqb cls "java/lang/Float" then "F" else if String.eqb cls "java/lang/Double" then "D"
                else if String.eqb cls "java/lang/Void" then "V" else prim_desc cls in
       let (r, s') := intern s (OCls d) in MOk (Some (VRef r)) s'
-    (* Throwable.getMessage / getLocalizedMessage of a VM-created exception
-       (Machine.throw_msg); other exception objects carry no modelled message *)
-    else if is_builtin_throwable cls && (String.eqb name "getCause" && String.eqb desc "()Ljava/lang/Throwable;"
-                                         || String.eqb name "getTargetException" && String.eqb desc "()Ljava/lang/Throwable;") then
-      match args with
-      | [VRef l] => match ms_heap s l with
-                    | Some (OObj _ fs) => match assoc "target" fs with Some v => MOk (Some v) s | None => MStuckModel "getCause: causes are not modelled" end
-                    | _ => MStuckModel "getCause"
-                    end
-      | _ => MStuckModel "getCause"
-      end
-    else if is_builtin_throwable cls && String.eqb name "toString" && String.eqb desc "()Ljava/lang/String;" then
-      match args with
-      | [VRef l] => match ms_heap s l with
-                    | Some (OObj c fs) =>
-                        match find_class p c, assoc "detailMessage" fs with
-                        | None, Some VNull => ret_new s (OStr (class_name_units c))
-                        | None, Some v => match str_of s v with
-                                          | Some u => ret_new s (OStr (app (class_name_units c) (app [58; 32] u)))
-                                          | None => MStuckModel "Throwable.toString"
-                                          end
-                        | _, _ => MStuckModel "Throwable.toString"
-                        end
-                    | _ => MStuckModel "Throwable.toString"
-                    end
-      | _ => MStuckModel "Throwable.toString"
-      end
-    else if is_builtin_throwable cls && (String.eqb name "getMessage" || String.eqb name "getLocalizedMessage")
-            && String.eqb desc "()Ljava/lang/String;" then
-      match args with
-      | [VRef l] => match ms_heap s l with
-                    | Some (OObj c fs) =>
-                        (* the message set by a modelled constructor (also of a loaded subclass,
-                           which reaches this model only if it does not override getMessage) *)
-                        match assoc "detailMessage" fs with
-                        | Some v => MOk (Some v) s
-                        | None => MStuckModel "exception message not modelled"
-                        end
-                    | _ => MStuckModel "getMessage"
-                    end
-      | _ => MStuckModel "getMessage"
-      end
+    (* Throwable's methods (causes, suppressed exceptions, messages, toString) *)
+    else if is_builtin_throwable cls && match throwable_model name desc args s with MNoModel => false | _ => true end then
+      throwable_model name desc args s
     else if String.eqb cls "java/lang/Object" then
       if String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
-      else object_model e name desc args s
+      else object_model p e name desc args s
     else if String.eqb cls "java/lang/String" then
       match string_model e name desc args s with
       | MNoModel => match string_static name desc args s with
-                    | MNoModel => object_model e name desc args s
+                    | MNoModel => object_model p e name desc args s
                     | r => r
                     end
       | r => r
@@ -2013,6 +2460,8 @@ Definition jdk_model (p : program) (e : jenv) : model :=
       sb_model name desc args s
     else if is_box_class cls && match box_model cls name desc args s with MNoModel => false | _ => true end then
       box_model cls name desc args s
+    else if is_fbox cls && match fbox_model cls name desc args s with MNoModel => false | _ => true end then
+      fbox_model cls name desc args s
     else if String.eqb cls "java/lang/Character" then char_model e name desc args s
     else if String.eqb cls "java/lang/Integer" || String.eqb cls "java/lang/Long" || String.eqb cls "java/lang/Math" then
       num_model e cls name desc args s
@@ -2036,12 +2485,14 @@ Definition jdk_model (p : program) (e : jenv) : model :=
       | _ => MStuckModel "Array.newInstance args"
       end
     else if String.eqb cls "java/util/Objects" then objects_model name desc args s
+    else if String.eqb cls "java/util/ModelEnv" && String.eqb name "seed" && String.eqb desc "(I)J" then
+      match args with [VInt n] => MOk (Some (VLong (j_seed e n))) s | _ => MStuckModel "ModelEnv.seed" end
     else if String.eqb cls "java/lang/System" && String.eqb name "arraycopy" then arraycopy p args s
     else if String.eqb cls "java/lang/System" && String.eqb name "identityHashCode" && String.eqb desc "(Ljava/lang/Object;)I" then
       match args with [VNull] => ret_int s 0 | [VRef l] => ret_int s (j_ihash e l) | _ => MStuckModel "identityHashCode" end
     else if String.eqb cls "java/util/Arrays" then arrays_model p name desc args s
     else if String.eqb cls "java/lang/Enum" then enum_model name desc args s
-    else if prefix "[" cls then object_model e name desc args s
+    else if prefix "[" cls then object_model p e name desc args s
     else if prefix "org/slf4j/" cls then slf4j_model e cls name desc args s
     else if String.eqb cls "java/lang/Class" then class_model p name desc args s
     else if String.eqb cls REFM || String.eqb cls REFC || String.eqb cls REFF

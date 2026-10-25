@@ -17,6 +17,11 @@ public class LinkedHashMap<K, V> extends HashMap<K, V> implements Map<K, V> {
     transient HashMap.Node<K, V> tail;
     final boolean accessOrder;
 
+    void reinitialize() {
+        super.reinitialize();
+        head = tail = null;
+    }
+
     public LinkedHashMap(int initialCapacity, float loadFactor) {
         super(initialCapacity, loadFactor);
         accessOrder = false;
