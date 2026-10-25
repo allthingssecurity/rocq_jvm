@@ -1,0 +1,16 @@
+/* rocq-jvm model of java.util.NavigableSet (clean-room, Apache-2.0). */
+package java.util;
+
+public interface NavigableSet<E> extends SortedSet<E> {
+    E lower(E e);
+    E floor(E e);
+    E ceiling(E e);
+    E higher(E e);
+    E pollFirst();
+    E pollLast();
+    Iterator<E> descendingIterator();
+    NavigableSet<E> descendingSet();
+    NavigableSet<E> subSet(E fromElement, boolean fromInclusive, E toElement, boolean toInclusive);
+    NavigableSet<E> headSet(E toElement, boolean inclusive);
+    NavigableSet<E> tailSet(E fromElement, boolean inclusive);
+}

@@ -1,0 +1,7 @@
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests semaphoreCount (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests semaphoreOps (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests semaphoreHandoff (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests timerOrder (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests timerPeriodic (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests scheduledOrder (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel SchedTests scheduledPeriodic (I)Ljava/lang/String;

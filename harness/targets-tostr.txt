@@ -1,0 +1,5 @@
+classes/corpus13:classes/jdkmodel ToStr valueOfs (I)Ljava/lang/String;
+classes/corpus13:classes/jdkmodel ToStr appends (I)Ljava/lang/String;
+classes/corpus13:classes/jdkmodel ToStr concats (I)Ljava/lang/String;
+classes/corpus13:classes/jdkmodel ToStr throwing (I)Ljava/lang/String;
+classes/corpus13:classes/jdkmodel ToStr nested (I)Ljava/lang/String;

@@ -29,9 +29,9 @@ while read -r dir cls meth desc opt; do
   # directories are model classes for the Rocq machine (e.g. java.util models).
   FRESH=$fresh nice "$JAVA" -Xmx512m -cp harness/work:harness/work/slf4j DiffRunner "${dir%%:*}" "$cls" "$meth" "$desc" "$in" 2>/dev/null > harness/work/$tag.hs
   if [[ "${MODE:-frame}" == threads ]]; then
-    nice harness/threads_main.exe "$dir" "$cls" "$meth" "$desc" "$in" "$FUEL" harness/work/unicode-21.txt > harness/work/$tag.md
+    nice ${THREADS_EXE:-harness/threads_main.exe} "$dir" "$cls" "$meth" "$desc" "$in" "$FUEL" harness/work/unicode-21.txt > harness/work/$tag.md
   elif [[ "${MODE:-frame}" == machine ]]; then
-    nice harness/machine_main.exe "$dir" "$cls" "$meth" "$desc" "$in" "$FUEL" harness/work/unicode-21.txt > harness/work/$tag.md
+    nice ${MACHINE_EXE:-harness/machine_main.exe} "$dir" "$cls" "$meth" "$desc" "$in" "$FUEL" harness/work/unicode-21.txt > harness/work/$tag.md
   else
     nice harness/model_main.exe "$f" "$meth" "$desc" "$in" "$FUEL" > harness/work/$tag.md
   fi

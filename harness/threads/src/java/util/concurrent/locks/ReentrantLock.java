@@ -42,8 +42,21 @@ public class ReentrantLock implements Lock, java.io.Serializable {
             return false;
         }
     }
-    public boolean tryLock(long timeout, TimeUnit unit) throws InterruptedException { return timedTryLock0(timeout); }
-    private native boolean timedTryLock0(long timeout);
+    public boolean tryLock(long timeout, TimeUnit unit) throws InterruptedException {
+        Thread me = Thread.currentThread();
+        if (Thread.interrupted()) throw new InterruptedException();
+        long nanos = unit.toNanos(timeout);
+        synchronized (mon) {
+            long deadline = System.nanoTime() + nanos;
+            while (owner != null && owner != me) {
+                if (nanos <= 0) return false;
+                mon.wait(Math.max(1, nanos / 1000000L));
+                nanos = deadline - System.nanoTime();
+            }
+            owner = me; holds++;
+            return true;
+        }
+    }
     public void unlock() {
         synchronized (mon) {
             if (owner != Thread.currentThread()) throw new IllegalMonitorStateException();
@@ -108,11 +121,33 @@ public class ReentrantLock implements Lock, java.io.Serializable {
             }
             if (interrupted) Thread.currentThread().interrupt();
         }
-        public long awaitNanos(long n) throws InterruptedException { return timed0(n); }
-        public boolean await(long time, TimeUnit unit) throws InterruptedException { return timed1(time); }
-        public boolean awaitUntil(java.util.Date deadline) throws InterruptedException { return timed1(0); }
-        private native long timed0(long n);
-        private native boolean timed1(long n);
+        public long awaitNanos(long nanos) throws InterruptedException {
+            if (Thread.interrupted()) throw new InterruptedException();
+            if (!lock.ownedByMe()) throw new IllegalMonitorStateException();
+            InterruptedException ie = null;
+            int h;
+            long rem = nanos;
+            synchronized (this) {
+                h = lock.releaseAll();
+                int gen = generation;
+                waiting++;
+                long deadline = System.nanoTime() + nanos;
+                try {
+                    while (permits == 0 && gen == generation && rem > 0) {
+                        wait(Math.max(1, rem / 1000000L));
+                        rem = deadline - System.nanoTime();
+                    }
+                    if (gen == generation && permits > 0) permits--;
+                } catch (InterruptedException e) { ie = e; }
+                waiting--;
+            }
+            lock.reacquire(h);
+            if (ie != null) throw ie;
+            return rem;
+        }
+        public boolean await(long time, TimeUnit unit) throws InterruptedException { return awaitNanos(unit.toNanos(time)) > 0; }
+        public boolean awaitUntil(java.util.Date deadline) throws InterruptedException { return awaitUntil0(); }
+        private native boolean awaitUntil0();
         public void signal() {
             if (!lock.ownedByMe()) throw new IllegalMonitorStateException();
             synchronized (this) { if (waiting > permits) { permits++; notifyAll(); } }

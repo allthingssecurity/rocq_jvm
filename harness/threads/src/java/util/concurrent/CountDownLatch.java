@@ -11,8 +11,19 @@ public class CountDownLatch {
         if (Thread.interrupted()) throw new InterruptedException();
         synchronized (this) { while (count > 0) wait(); }
     }
-    public boolean await(long timeout, TimeUnit unit) throws InterruptedException { return timedAwait0(timeout); }
-    private native boolean timedAwait0(long timeout);
+    public boolean await(long timeout, TimeUnit unit) throws InterruptedException {
+        if (Thread.interrupted()) throw new InterruptedException();
+        long nanos = unit.toNanos(timeout);
+        synchronized (this) {
+            long deadline = System.nanoTime() + nanos;
+            while (count > 0) {
+                if (nanos <= 0) return false;
+                wait(Math.max(1, nanos / 1000000L));
+                nanos = deadline - System.nanoTime();
+            }
+            return true;
+        }
+    }
     public void countDown() {
         synchronized (this) {
             if (count > 0) { count--; if (count == 0) notifyAll(); }

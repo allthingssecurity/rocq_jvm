@@ -90,6 +90,16 @@ source of java.base and checked against HotSpot by the corpora `harness/corpus3`
 Not modelled on purpose: `Object.hashCode`/`identityHashCode` (nondeterministic), I/O, Method/Field/Constructor
 reflection, class loaders.
 
+- Reflection (`reflect_model`, `class_member_model`): the members found, the access rules and the messages follow
+  JDK 21 (`Class.getMethod0`, `Reflection.verifyMemberAccess`, `DirectMethodHandleAccessor`); invocation runs
+  synthetic bytecode in a frame of its own (`Machine.MFrame`: loads, the invoke, boxing, an exception handler
+  that wraps in InvocationTargetException), so the callee is the real bytecode with the machine's dispatch.
+
+## 5a. Virtual machine errors
+JVMS 6.3 allows a VirtualMachineError (OutOfMemoryError, StackOverflowError, InternalError) at any point. The
+model never throws one: arrays above 2^20 elements are STUCK and there is no stack depth limit. A theorem says
+what a run does when no VirtualMachineError occurs, which is all a program can rely on.
+
 ## 5b. Threads (`theories/Core/Threads.v`) and the concurrency model classes
 - The thread layer is the **sequentially consistent** interleaving semantics: every step of every thread is an
   atomic step of the single-thread machine on the shared heap. For data-race-free programs this is exactly the

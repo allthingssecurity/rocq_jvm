@@ -13,3 +13,4 @@ classes/thread-tests:classes/threadmodel ConcTests lockErrors (I)Ljava/lang/Stri
 classes/thread-tests:classes/threadmodel ConcTests conditionBuffer (I)I
 classes/thread-tests:classes/threadmodel ConcTests threadLocals (I)Ljava/lang/String;
 classes/thread-tests:classes/threadmodel ConcTests interruptLock (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel ThreadTests syncNotify (I)I

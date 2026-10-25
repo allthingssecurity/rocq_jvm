@@ -1,0 +1,7 @@
+classes/thread-tests:classes/threadmodel:classes/jdkmodel ChmThreads mergeCounts (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel ChmThreads computeOnce (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel ChmThreads putIfAbsentWinners (I)I
+classes/thread-tests:classes/threadmodel:classes/jdkmodel ChmThreads resizeRace (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel ChmThreads replaceLoop (I)I
+classes/thread-tests:classes/threadmodel:classes/jdkmodel ChmThreads iterateWhileWriting (I)Ljava/lang/String;
+classes/thread-tests:classes/threadmodel:classes/jdkmodel ChmThreads computeSameBin (I)Ljava/lang/String;

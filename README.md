@@ -16,6 +16,7 @@ To prove something about your own code, compile it, dump the class files with `t
 
 Status: work in progress, started 2026-10-23. See [STATUS.md](STATUS.md) for the full list of what is proved and
 [TRUST.md](TRUST.md) for exactly what a reader has to trust.
+To use the model on your own bytecode (a bug candidate from testing, TLA+ or DST), see [docs/USING.md](docs/USING.md).
 
 ---
 
@@ -69,11 +70,20 @@ Every theorem below reports `Print Assumptions` = *Closed under the global conte
   keys. This covers all four internal paths of `put`: key present, free slot, compaction (the fix) and growth.
   The slot arrays never exceed `max(initial length, 3 × threshold)`, however many operations run.
   - The theorem assumes `resize()` is not reached (fewer than `threshold` entries whenever a new key is put).
-  - It also assumes that, on the keys used, `equalsIgnoreCase` is an equivalence consistent with the hash.
+  - It assumes that, on the keys used, `equalsIgnoreCase` is an equivalence consistent with the hash. For ASCII
+    keys of any length this is proved (`CimAscii.ascii_key_laws`), and `CimSessionAscii.session_ok_ascii` is the
+    session theorem with no assumption on the keys.
 - **A real defect found while writing the spec:** for supplementary characters (e.g. U+10400 / U+10428),
   `equalsIgnoreCase` says two keys are equal but `caseInsensitiveHash` gives them different hashes. The map then
   stores both keys and `get` misses (`CimSpec.cih_inconsistent_supplementary`). The behaviour is reproduced on
   HotSpot with the real classes, on main and on the fix. Details: [docs/finding-cim-supplementary-case.md](docs/finding-cim-supplementary-case.md).
+
+### camel-util `FilterIterator` and `TimeUtils` (`NewBugs.v`)
+- `FilterIterator`: `next(); hasNext(); remove()` removes the wrong element, because `hasNext()` has already moved
+  the underlying iterator (`filter_remove_wrong_element`, `filter_remove_before_next`).
+- `TimeUtils.isPositive(Duration.ofNanos(-1))` returns true (`negative_nanosecond_is_reported_positive`).
+- Both are kernel-checked runs of the real Camel bytecode (and the real JDK `Duration` getters), reproduced on
+  HotSpot. Details: `docs/finding-filter-iterator-remove.md`, `docs/finding-time-utils-negative-duration.md`.
 
 ### Java memory model (Track C)
 - An abstract event model of executions (JLS 17.4) with happens-before, data races and sequential consistency.
@@ -81,7 +91,8 @@ Every theorem below reports `Print Assumptions` = *Closed under the global conte
   (`DRF.drf_execution_sc`, `DRF.drf_sc_no_thin_air`).
 - The JLS 17.4.8 example, proving that happens-before consistency alone is *not* enough
   (`Examples.hb_model_not_drf_sc`).
-- This part is not yet connected to the bytecode machine.
+- The thread layer of the machine is the sequentially consistent semantics; its formal link to these executions
+  is not written yet.
 
 ---
 
@@ -96,20 +107,30 @@ Every theorem below reports `Print Assumptions` = *Closed under the global conte
   BootstrapMethods, modified UTF-8.
 - **Machine:**
   - heap objects and all array kinds with store checks;
-  - exceptions and handler search across frames;
-  - all invoke kinds with resolution and virtual/interface dispatch;
-  - class initialisation (JVMS 5.5);
-  - `checkcast`/`instanceof`;
-  - monitors (single thread);
-  - interned strings;
-  - `invokedynamic` for string concatenation and lambdas.
+  - exceptions and handler search across frames, with HotSpot's messages for the exceptions the VM creates;
+  - all invoke kinds with JVMS 5.4.3–5.4.6 resolution and selection (private, package-private, default methods);
+  - field resolution and class initialisation in the order of JVMS 5.5;
+  - `checkcast`/`instanceof`, interned strings;
+  - `invokedynamic`: string concatenation, lambdas and method references (incl. `Foo::new`, serializable and marker
+    lambdas), records' `toString`/`equals`/`hashCode`, pattern and enum switches.
+- **Threads** (`theories/Core/Threads.v`): the multi-threaded JVM as an interleaving of single-thread steps over the
+  shared heap — blocking monitors and `synchronized` methods, `wait`/`notify`/`notifyAll`, interrupts,
+  `Thread.start/join/sleep/yield/currentThread`, class initialisation across threads (JLS 12.4.2). The step relation
+  ranges over every schedule; this is the sequentially consistent semantics, which by DRF-SC is the JMM for
+  race-free programs. Clean-room models on top: `Thread`, `ThreadLocal`, the atomics, `CountDownLatch`,
+  `ReentrantLock`/`Condition`.
+- **Reflection:** `java.lang.Class` (names, hierarchy, `isInstance`, `cast`, `forName`, ...) and
+  `java.lang.reflect` (`getMethod`/`getDeclaredMethod`/`getConstructor`/`getField`..., `Method.invoke`,
+  `Constructor.newInstance`, `Field.get/set`) with the JDK's access checks and exception messages. The model calls
+  back into bytecode through a synthetic frame, so the invoked method is the real bytecode.
 - **JDK:** Rocq models of String, StringBuilder, Character (with Unicode tables as a parameter),
-  Integer/Long/Math, boxing caches, Objects, `System.arraycopy`, Arrays, Enum and the slf4j loggers. java.util
-  collections (ArrayList, HashMap with tree bins, LinkedHashMap, sets, Collections views) are clean-room Java
-  model classes that the machine loads and runs.
-- **Not modelled yet:** threads in the machine (the memory model above is separate), reflection, class loaders,
-  and natives without a model. A run that needs any of these gets *stuck*. A stuck run never produces a result,
-  so a missing feature can make a theorem unprovable but can never make a false theorem provable.
+  Integer/Long/Math, boxing caches, Objects, `System.arraycopy`, Arrays, Enum, exception messages and the slf4j
+  loggers. java.util collections (ArrayList, HashMap with tree bins, LinkedHashMap, sets, Collections views) are
+  clean-room Java model classes that the machine loads and runs.
+- **Not modelled yet:** the non-sequentially-consistent behaviours the JMM allows for racy programs, class loaders,
+  the bytecode verifier, and the parts of the JDK without a model (I/O, regex, streams, ConcurrentHashMap, ...).
+  A run that needs any of these gets *stuck*. A stuck run never produces a result, so a missing feature can make
+  a theorem unprovable but can never make a false theorem provable.
 
 ### Differential testing (extracted model vs HotSpot 21.0.12)
 
@@ -125,6 +146,8 @@ All corpora report **0 mismatches**, for example:
 | java.util models | 14 targets × 10,000 |
 | whole-class CaseInsensitiveMap scenarios | 2,000 runs |
 | whole-class camel-wal scenarios | 4,516 runs |
+| threads (each input under 6 schedulers) | 33 programs × 200–300 |
+| reflection | 16 programs × 1,000–2,000 |
 
 The full table is in [STATUS.md](STATUS.md). Canary runs, with deliberately broken models, confirm that the
 comparison catches wrong models.
@@ -147,6 +170,7 @@ harness/         differential testing: OCaml drivers, Java DiffRunner, corpora, 
 tools/           build Camel classes at a commit, dump .class files to Rocq, check the dumps, coverage
 docs/            opcode coverage, float status, java.util models, Track C design, findings
 PLAN.md          phases and checkpoints
+docs/USING.md    how to use the model on your own bytecode
 STATUS.md        what is proved, what is assumed, test counts
 TRUST.md         the trust base
 ```
@@ -181,17 +205,13 @@ To rebuild the Camel `.class` files from source at the recorded commits, see `to
 
 ## Branches
 
-- `master`: everything listed above.
-- `model-gaps`: model work that is complete and differentially tested but not yet merged into `master`. It adds
-  JVMS-exact field resolution and initialisation order, full method selection (JVMS 5.4.3–5.4.6),
-  `invokedynamic` for `Foo::new`, `altMetafactory`, records and pattern switches, and HotSpot's exception
-  messages. Merging needs a full rebuild of the Camel proofs on top of it.
+- `main`: everything listed above.
+- `model-gaps`: the field/method resolution, invokedynamic and exception-message work, now merged into `main`.
 
 ## Next
 
-- Merge `model-gaps`.
-- Prove the key-string assumptions of the CaseInsensitiveMap theorem for ASCII keys.
-- Cover `resize()`.
+- Link the thread layer to the Java memory model formally (racy programs).
+- Cover CaseInsensitiveMap `resize()`.
 - Then the Camel helpers in StringHelper, FileUtil and URISupport.
 - Later: connect the memory model to the machine, then reflection and class loading.
 

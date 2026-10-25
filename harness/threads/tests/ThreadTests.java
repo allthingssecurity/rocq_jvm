@@ -284,4 +284,18 @@ public class ThreadTests {
         t.start(); t.join();
         return before + " " + out[0] + " " + small(n);
     }
+
+    // ---- monitors held by synchronized methods, one thread (also run on the single-thread machine) ----
+    static final class Mon {
+        int n;
+        synchronized int bump() { n++; notify(); notifyAll(); return n; }
+        static synchronized int sbump(int k) { ThreadTests.Mon.class.notifyAll(); return k + 1; }
+        int outside() { try { notify(); return 0; } catch (IllegalMonitorStateException e) { return -1; } }
+        synchronized int nested() { synchronized (this) { notify(); } notify(); return 7; }
+    }
+
+    public static int syncNotify(int n) {
+        Mon m = new Mon();
+        return m.bump() * 1000 + Mon.sbump(small(n)) * 10 + m.outside() + m.nested() * 100000;
+    }
 }

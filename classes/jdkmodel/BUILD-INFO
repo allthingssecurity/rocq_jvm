@@ -1,4 +1,4 @@
-built 2026-10-23T18:19:45Z by harness/jdkmodel/build.sh
+built 2026-10-25T04:47:32Z by harness/jdkmodel/build.sh
 javac 21.0.12.1
 72f7fcfea117651f8cab7df9016bc7b8419fd39647b35adea412291e51d3e4bd  ./java/util/AbstractCollection.class
 97af39b01b4a0e75d32202608d0b3fa9dad33c4eea1bcb19b520e02c6b238a24  ./java/util/AbstractList$Itr.class
@@ -15,9 +15,9 @@ c864b4faa8df2000b8636581301e39a8729e09639547b356ae6f544d6ffd9784  ./java/util/Ab
 26936ac98c4413df5be007dd5ec1ae0e42b6d86b8fd0830b5a0ea329aa9139ce  ./java/util/ArrayList$Itr.class
 3429928f50ce2575c23a3a94a80f1ecf103ee4b87c7049a60495e5a1830c259a  ./java/util/ArrayList$ListItr.class
 b8747bf3ab079796743fe18852a3a66aba33387e9dd1016e5a2b7ffd2b33234c  ./java/util/ArrayList.class
-68f98fd1ba51fa4b31f4d3ec8a34f8425201c22911ca2bcb672d384d0aed50ef  ./java/util/Arrays$ArrayItr.class
-ea80b2ddefcdd1a51b0f3354c6dbd7833682b211a61d2970536e8b2c7e16957e  ./java/util/Arrays$ArrayList.class
-e3617bbbcd3d7dd4d01f4c22f8261e03d9cc1e1647d65d50d783a95b32dd0bc3  ./java/util/Arrays.class
+dc2495cb79525e9e2c6b60eb1098f3c86dcfaa0bb40cfb5b2ad0840fff749c44  ./java/util/Arrays$ArrayItr.class
+e2795bfb3c9fc6c580b5fbe10267df146058a9cb643aa5f9f48b349ec24dd9b5  ./java/util/Arrays$ArrayList.class
+fb22aabf73f51492c6453ba9c2280db34bb464692815654e9f2657e4eed66fd9  ./java/util/Arrays.class
 dec0ec8633528cbc6073cd324e1307eb22de4147e219bf8dd9728a1d93d21638  ./java/util/Collection.class
 870daa052335fe5c0df9c9c22d36a36ab70977741bc187210cf5ad7d8913be5e  ./java/util/Collections$1.class
 49455f30523283b84522538355bbad32fddcd4349ee12a092e2a9c83e04bb220  ./java/util/Collections$EmptyIterator.class
@@ -38,6 +38,8 @@ db52810e649b65e35c12e869cdd6cc832bb91689172d65a66e634c7b038edac3  ./java/util/Co
 7f7ba0028e140581b8fe3deb3f9d1e1f02e52325e364b745ec34564778389704  ./java/util/Collections$UnmodifiableRandomAccessList.class
 115cdc0b865284a2d46233d6d4cd0837f8fe7a05fdc7d4cc6c70ac7ee089fdc8  ./java/util/Collections$UnmodifiableSet.class
 5a6b3587ed2a0ef5537693683e0bc565eb3ef90a04b25f00ed9a661992138ed0  ./java/util/Collections.class
+8b2eca0920dcd94d585f8cc892e3f5bd69dac1533f4657dd9679606548ea1c36  ./java/util/Enumeration$1.class
+202f40c504362838d6491664dfbcbd9e035e79f3eef440b6e42de933f47849f7  ./java/util/Enumeration.class
 28068e163881130326980127ccdbd1aa7d4fa633ec01949cb03545b1e3dc765a  ./java/util/HashMap$EntryIterator.class
 dc3a656df252fce06df77dd284a5e0b82c4573931f0d8ed8287bf9d61a6061f4  ./java/util/HashMap$EntrySet.class
 9d4df45211d9a3f7e048ef2771e90af5198eadf1f5ecb5998da0d1e226de768a  ./java/util/HashMap$HashIterator.class
@@ -64,5 +66,37 @@ b3876a5b58048274b7e63351b43f1e192c4e00736fdd35a1fb9517d1a9739658  ./java/util/Li
 eaf24d0d058b0cf84d43f73613623bc5b04574ceeee5ac0d54e74409900c019d  ./java/util/Map$Entry.class
 a32003d8df2d653276bb16e8581fd004c1d733e5dbbda6b2245b6cdf006a1f3b  ./java/util/Map.class
 77017c9ca1b315954e4797f3c49c24913f7d76d611815900ad2753d21dd94b3c  ./java/util/ModelStuck.class
+a70eeaa6302490cf768c1beef2b30bbdf68acc0df8ee6849f344bc7fb1c6e390  ./java/util/NavigableMap.class
+caf0cb636fa0046b335d48a3c7194bd9870f32e60a3a77ae64cdc82d756a59dc  ./java/util/NavigableSet.class
 76b3afb29e76b5912781d45a824002f330a57862e724c249544beff05f932460  ./java/util/RandomAccess.class
 306234ae52d313c49893a40ffeeb60bbc5c9040cf4158fc53bb0ffc2f7645e87  ./java/util/Set.class
+4ba84dd043b92426f6e3731471d021deff1ae49965331e2fe4d396a8392c190d  ./java/util/SortedMap.class
+35772ae695de818a32d7cf98848cfcfb911db5a119ba46d59dd2a9f8b9527583  ./java/util/SortedSet.class
+33e13b908331a848d907d5812a16aea05efe4dc0be5755eaf3c43f573dce0ac9  ./java/util/TreeMap$Entry.class
+0853fd79640c18ac958e7efc9d934f13306f4f28afdc3fbb5efaf18797b1627e  ./java/util/TreeMap$EntryIterator.class
+2fb3887b7299b18de2a2132a524b6e357c3626db8ea5ca065f8ed05a6f4a2d9e  ./java/util/TreeMap$EntrySet.class
+4584ecf28827e3cfdd0c880ac8d93dc128992083b8887d9648373cd9472fadfe  ./java/util/TreeMap$KeyIterator.class
+f472041ed7cc0347bfaedb98d02f12c182f64f1bdf4600c8e00515bf76576788  ./java/util/TreeMap$KeySet.class
+1d82b40eb39303b2f4b69c7f7fbc4bae44efbaf3c90d0812ffa63e5b3921c79b  ./java/util/TreeMap$PrivateEntryIterator.class
+09bb6509df52a987d11ed25f400af0d26a11ee313274861b7deb1ee7701bd1d0  ./java/util/TreeMap$ValueIterator.class
+cade2fa96bf5b74332c2d7b35e69dd64714bcc6f349cb741ef7b1ee5e5146b13  ./java/util/TreeMap$Values.class
+eb8d0c6c2abc1360cdd89d0170adead789815b733259b50bb25a4763702e0be6  ./java/util/TreeMap.class
+a2dcc3e2ebd3a0affb33cf4263089750586f369de4712db8409ea3fcbb4c64f2  ./java/util/TreeSet.class
+56aa65ba981a51b0e0800dae16db233988174f5cdc412526d080d12d9e3e65d7  ./java/util/concurrent/ConcurrentHashMap$BaseIterator.class
+6fd0d4d52d4ce7bfb023b8ed39e39dc92dc376f919bd7eea2106bd62294cb9d2  ./java/util/concurrent/ConcurrentHashMap$CollectionView.class
+5ac7a9643c482456f7d504c2527e6f954eb6b4423d8668072036ec378b72c009  ./java/util/concurrent/ConcurrentHashMap$EntryIterator.class
+e3080d910d23327472ecd8c99dc7f54b09663962b9dd481b8fd6ba7cdb6fc3df  ./java/util/concurrent/ConcurrentHashMap$EntrySetView.class
+e425cd337955ed13b37136ce22a6ce2b8d5e6159d577afdfa64691394271ee94  ./java/util/concurrent/ConcurrentHashMap$ForwardingNode.class
+4ee554009029c928d7380ab3ad0b0ea887c827d890131067b0f3b5f4485aeeed  ./java/util/concurrent/ConcurrentHashMap$KeyIterator.class
+1e4907975f3dcf68bfb26247ff70253f10710f2e9b0e3b23d63336e93f8a5f41  ./java/util/concurrent/ConcurrentHashMap$KeySetView.class
+20d77200adaf315abc028f1e9274655a75d428a54055e4b775ec554e9ceeca31  ./java/util/concurrent/ConcurrentHashMap$MapEntry.class
+8a9f3e7b7a4affefaa98b7777e51fa6bd708490f9bc4ecfae298f02ab67eda9f  ./java/util/concurrent/ConcurrentHashMap$Node.class
+b5b86e70b5272f832d175b5350e8bb82b7da7c06bb52ef103d0ae4008b55353b  ./java/util/concurrent/ConcurrentHashMap$ReservationNode.class
+581c5134894bbcc32cbe282359ff8b07e462d150c6662317ad465ce2579a9b4a  ./java/util/concurrent/ConcurrentHashMap$Traverser.class
+1c9162a9365f17e1b6a907992d9964295c91234c7e1d7f00257d6b314bd32816  ./java/util/concurrent/ConcurrentHashMap$TreeBin.class
+9977a19a347bbb89cb605f432af005804a3398d01551f5f83cf586e130b563a5  ./java/util/concurrent/ConcurrentHashMap$TreeNode.class
+09452f93bb9edffd5d7fc29f8a10114bb7d9ea8fa5897cb2cd934d5d7ecf7460  ./java/util/concurrent/ConcurrentHashMap$ValueIterator.class
+f71c832a048474863c68d6ab60f4e01d561ceb452df556fba1ed687214bf0262  ./java/util/concurrent/ConcurrentHashMap$ValuesView.class
+427fdd06c28089f14b08dd7079c118f803870d6a4038b4280776ce1d66ead6b3  ./java/util/concurrent/ConcurrentHashMap.class
+4b12e85b6936002ffd08a13cf2c70fdc4a4cf5766384a0a691bfca2247d0a1f4  ./java/util/concurrent/ConcurrentMap.class
+8ee1d00180135d0ef5fd4a3ea3f250cbfe9b9ad43e230673f52926c1e894969c  ./java/util/concurrent/ModelStuck.class

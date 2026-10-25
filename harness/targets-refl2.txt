@@ -1,0 +1,7 @@
+classes/corpus12 ReflTests invokeStatic (I)Ljava/lang/String;
+classes/corpus12 ReflTests invokeVirtual (I)Ljava/lang/String;
+classes/corpus12 ReflTests invokeErrors (I)Ljava/lang/String;
+classes/corpus12 ReflTests access (I)Ljava/lang/String;
+classes/corpus12 ReflTests constructors (I)Ljava/lang/String;
+classes/corpus12 ReflTests fields (I)Ljava/lang/String;
+classes/corpus12 ReflTests staticInit (I)I fresh

@@ -1,0 +1,9 @@
+# ConcurrentHashMap model (classes/jdkmodel) vs the real JDK 21, single thread.
+# Build: harness/jdkmodel/build.sh   Run: MODE=machine harness/difftest.sh harness/targets-chm.txt 300 <seed>
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ChmOps ops (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ChmOps trees (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ChmOps compute (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ChmOps recursive (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ChmOps views (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ChmOps errors (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ChmOps iface (I)Ljava/lang/String;

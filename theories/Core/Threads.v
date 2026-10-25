@@ -30,10 +30,11 @@ Open Scope Z_scope.
 
 Inductive tstatus : Type :=
 | TRun
-| TWait (l : Z) (cnt : Z) (timed : bool)  (** in the wait set of monitor [l]; [cnt] entries to restore; the pc stays at the invoke *)
+| TWait (l : Z) (cnt : Z) (deadline : option Z)  (** in the wait set of monitor [l]; [cnt] entries to restore;
+                                       a timed wait ends at [deadline] (nanoTime) at the latest; the pc stays at the invoke *)
 | TReacq (l : Z) (cnt : Z) (intr : bool)  (** notified, woken or interrupted ([intr]): must reacquire
                                        [l] [cnt] times, then wait returns or throws InterruptedException *)
-| TSleep (intr : bool)             (** in Thread.sleep; [intr]: interrupted *)
+| TSleep (intr : bool) (deadline : Z) (** in Thread.sleep until the clock reaches [deadline]; [intr]: interrupted *)
 | TDone (v : option value)         (** run() / the entry method returned *)
 | TDead (exn : Z).                 (** an exception left the thread *)
 
@@ -53,6 +54,7 @@ Record tmstate := mktm {
   tm_inited : list string;
   tm_initing : list (string * nat);  (** class whose initialisation thread [i] is running *)
   tm_threads : list thread;
+  tm_clock : Z;                       (** System.nanoTime: advanced by the scheduler *)
 }.
 
 Definition THREAD := "java/lang/Thread".
@@ -109,7 +111,8 @@ Definition merge (tm : tmstate) (i : nat) (t : thread) (s : mstate) (st : tstatu
                        (map (fun c => (c, i)) (clinit_classes (ms_frames s)));
      tm_threads := set_th (tm_threads tm) i
                      {| th_obj := th_obj t; th_frames := ms_frames s; th_locks := ms_locks s;
-                        th_sync := sync; th_status := st |} |}.
+                        th_sync := sync; th_status := st |};
+     tm_clock := tm_clock tm |}.
 
 Definition with_locks (s : mstate) (ls : list (Z * Z)) : mstate :=
   {| ms_heap := ms_heap s; ms_next := ms_next s; ms_statics := ms_statics s;
@@ -217,9 +220,13 @@ Fixpoint wake (ts : list thread) (l : Z) (which : option nat) : list thread :=
       end
   end.
 
+Definition set_clock (tm : tmstate) (c : Z) : tmstate :=
+  {| tm_heap := tm_heap tm; tm_next := tm_next tm; tm_statics := tm_statics tm; tm_inited := tm_inited tm;
+     tm_initing := tm_initing tm; tm_threads := tm_threads tm; tm_clock := c |}.
+
 Definition with_threads (tm : tmstate) (ts : list thread) : tmstate :=
   {| tm_heap := tm_heap tm; tm_next := tm_next tm; tm_statics := tm_statics tm; tm_inited := tm_inited tm;
-     tm_initing := tm_initing tm; tm_threads := ts |}.
+     tm_initing := tm_initing tm; tm_threads := ts; tm_clock := tm_clock tm |}.
 
 (** Continue thread [i] after an intercepted invoke: pc [nx], operand stack [st]. *)
 Definition advance (tm : tmstate) (i : nat) (t : thread) (top : cframe) (rest : list cframe) (nx : pc)
@@ -253,7 +260,7 @@ Definition clear_intr (tm : tmstate) (t : thread) : tmstate :=
   | Some (OObj c fs) =>
       {| tm_heap := upd (tm_heap tm) (th_obj t) (OObj c (set_field (intr_key fs) (VInt 0) fs));
          tm_next := tm_next tm; tm_statics := tm_statics tm; tm_inited := tm_inited tm;
-         tm_initing := tm_initing tm; tm_threads := tm_threads tm |}
+         tm_initing := tm_initing tm; tm_threads := tm_threads tm; tm_clock := tm_clock tm |}
   | _ => tm
   end.
 
@@ -272,7 +279,7 @@ Fixpoint interrupt_in (ts : list thread) (o : Z) : list thread :=
       if Z.eqb (th_obj t) o then
         match th_status t with
         | TWait l c _ => with_status t (th_locks t) (TReacq l c true) :: r
-        | TSleep _ => with_status t (th_locks t) (TSleep true) :: r
+        | TSleep _ d => with_status t (th_locks t) (TSleep true d) :: r
         | _ => t :: r
         end
       else t :: interrupt_in r o
@@ -289,7 +296,7 @@ Definition throw_null (p : program) (tm : tmstate) (i : nat) (t : thread) (cls :
   end.
 
 (** One step of thread [i]; [ch] chooses the waiter a [notify] wakes. *)
-Definition thread_step (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i : nat) : tres :=
+Definition thread_step0 (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i : nat) : tres :=
   match nth_th (tm_threads tm) i with
   | None => TRBlocked
   | Some t =>
@@ -315,11 +322,12 @@ Definition thread_step (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i 
                  end
              | nil => TRStuck "wait: no frame"
              end
-  | TSleep intr =>
-      (* the sleep ends (after its time, or interrupted) *)
+  | TSleep intr d =>
+      (* the sleep ends when interrupted, or once its time has passed (never early: JLS 17.10) *)
       let t1 := with_status t (th_locks t) TRun in
       let tm1 := with_threads tm (set_th (tm_threads tm) i t1) in
       if intr then throw_in p (clear_intr tm1 t1) i t1 IE (Some (ascii_units "sleep interrupted"))
+      else if tm_clock tm <? d then TRBlocked
       else match th_frames t1 with
            | top :: rest =>
                match fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) with
@@ -384,7 +392,8 @@ Definition thread_step (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i 
                             tm_statics := tm_statics tm; tm_inited := tm_inited tm; tm_initing := tm_initing tm;
                             tm_threads := set_th (tm_threads tm) i
                               {| th_obj := o; th_frames := th_frames t; th_locks := th_locks t;
-                                 th_sync := th_sync t; th_status := TRun |} |} in
+                                 th_sync := th_sync t; th_status := TRun |};
+                            tm_clock := tm_clock tm |} in
               match nth_th (tm_threads tm1) i with
               | Some t1 => TRNext (advance tm1 i t1 top rest nx (VRef o :: st) (th_locks t) TRun)
               | None => TRStuck "currentThread"
@@ -399,9 +408,19 @@ Definition thread_step (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i 
         end
       else if String.eqb (mr_class mr) THREAD && String.eqb (mr_name mr) "sleep0" then
         if intr_flag tm t then throw_in p (clear_intr tm t) i t IE (Some (ascii_units "sleep interrupted"))
-        else TRNext (with_threads tm (set_th (tm_threads tm) i (with_status t (th_locks t) (TSleep false))))
+        else match st with
+             | VLong ms :: _ =>
+                 TRNext (with_threads tm (set_th (tm_threads tm) i
+                   (with_status t (th_locks t) (TSleep false (tm_clock tm + ms * 1000000)))))
+             | _ => TRStuck "Thread.sleep0: argument"
+             end
       else if String.eqb (mr_class mr) THREAD && String.eqb (mr_name mr) "yield0" then
         TRNext (advance tm i t top rest nx st (th_locks t) TRun)
+      else if String.eqb (mr_class mr) "java/lang/System" && String.eqb (mr_desc mr) "()J"
+              && (String.eqb (mr_name mr) "nanoTime" || String.eqb (mr_name mr) "currentTimeMillis") then
+        (* the clock of the run; currentTimeMillis counts from 0 here (the epoch is not modelled) *)
+        let v := if String.eqb (mr_name mr) "nanoTime" then tm_clock tm else tm_clock tm / 1000000 in
+        TRNext (advance tm i t top rest nx (VLong v :: st) (th_locks t) TRun)
       else if (String.eqb (mr_name mr) "wait" && (String.eqb (mr_desc mr) "()V" || String.eqb (mr_desc mr) "(J)V"))
               && negb (match k with InvStatic => true | _ => false end) then
         let timed := String.eqb (mr_desc mr) "(J)V" in
@@ -415,7 +434,7 @@ Definition thread_step (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i 
             if ms <? 0 then throw_in p tm i t "java/lang/IllegalArgumentException" (Some (ascii_units "timeout value is negative"))
             else if c <=? 0 then throw_in p tm i t IMSE (Some not_owner)
             else if intr_flag tm t then throw_null p (clear_intr tm t) i t IE
-            else TRNext (with_threads tm (set_th (tm_threads tm) i (with_status t ((o, 0) :: th_locks t) (TWait o c timed))))
+            else TRNext (with_threads tm (set_th (tm_threads tm) i (with_status t ((o, 0) :: th_locks t) (TWait o c (if timed && (0 <? ms) then Some (tm_clock tm + ms * 1000000) else None)))))
         end
       else if (String.eqb (mr_name mr) "notify" || String.eqb (mr_name mr) "notifyAll") && String.eqb (mr_desc mr) "()V"
               && negb (match k with InvStatic => true | _ => false end) then
@@ -436,14 +455,29 @@ Definition thread_step (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i 
   end
   end.
 
+(** A thread that terminates wakes the threads waiting on its Thread object (as the JDK's
+    exit notifies, which timed join relies on). *)
+Definition after_step (tm : tmstate) (i : nat) : tmstate :=
+  match nth_th (tm_threads tm) i with
+  | Some u => if alive u then tm else with_threads tm (wake (tm_threads tm) (th_obj u) None)
+  | None => tm
+  end.
+
+Definition thread_step (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i : nat) : tres :=
+  match thread_step0 p mdl ch tm i with
+  | TRNext tm' => TRNext (after_step tm' i)
+  | r => r
+  end.
+
 (** ** The step relation: some thread steps, or a waiting thread wakes up spontaneously
-    (a spurious wakeup or a timeout, JLS 17.2.1). *)
+    (a spurious wakeup or a timeout, JLS 17.2.1), or time passes (System.nanoTime). *)
 Inductive tstep (p : program) (mdl : model) : tmstate -> tmstate -> Prop :=
 | ts_thread : forall tm i ch tm', thread_step p mdl ch tm i = TRNext tm' -> tstep p mdl tm tm'
 | ts_wakeup : forall tm i t l c b, nth_th (tm_threads tm) i = Some t -> th_status t = TWait l c b ->
     tstep p mdl tm (with_threads tm (set_th (tm_threads tm) i
       {| th_obj := th_obj t; th_frames := th_frames t; th_locks := th_locks t; th_sync := th_sync t;
-         th_status := TReacq l c false |})).
+         th_status := TReacq l c false |}))
+| ts_tick : forall tm d, 0 <= d -> tstep p mdl tm (set_clock tm (tm_clock tm + d)).
 
 (** ** Executable runs, for the differential tests. *)
 
@@ -474,10 +508,21 @@ Fixpoint nth_choice {A} (l : list A) (k : nat) : option A :=
   | nil, _ => None
   end.
 
-Fixpoint timed_waiter (ts : list thread) (k : nat) : option (nat * thread * Z * Z) :=
+Fixpoint timed_waiter (ts : list thread) (k : nat) : option (nat * thread * Z * Z * Z) :=
   match ts with
   | nil => None
-  | t :: r => match th_status t with TWait l c true => Some (k, t, l, c) | _ => timed_waiter r (S k) end
+  | t :: r => match th_status t with TWait l c (Some d) => Some (k, t, l, c, d) | _ => timed_waiter r (S k) end
+  end.
+
+(** The earliest end of a sleep. *)
+Fixpoint sleep_deadline (ts : list thread) : option Z :=
+  match ts with
+  | nil => None
+  | t :: r => match th_status t, sleep_deadline r with
+              | TSleep false d, Some e => Some (Z.min d e)
+              | TSleep false d, None => Some d
+              | _, e => e
+              end
   end.
 
 Fixpoint trun (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (step : nat) (tm : tmstate) : tresult :=
@@ -494,15 +539,20 @@ Fixpoint trun (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (step :
       | nil =>
           (* nothing can step: a timed wait times out (the first one), otherwise deadlock *)
           match timed_waiter (tm_threads tm) O with
-          | Some (i, t, l, c) =>
-              trun p mdl sch fuel' (S step) (with_threads tm (set_th (tm_threads tm) i
+          | Some (i, t, l, c, d) =>
+              (* the clock jumps to the deadline *)
+              trun p mdl sch fuel' (S step) (set_clock (with_threads tm (set_th (tm_threads tm) i
                 {| th_obj := th_obj t; th_frames := th_frames t; th_locks := th_locks t; th_sync := th_sync t;
-                   th_status := TReacq l c false |}))
-          | None => TRDeadlock tm
+                   th_status := TReacq l c false |})) (Z.max (tm_clock tm) d))
+          | None =>
+              match sleep_deadline (tm_threads tm) with
+              | Some d => if tm_clock tm <? d then trun p mdl sch fuel' (S step) (set_clock tm d) else TRDeadlock tm
+              | None => TRDeadlock tm
+              end
           end
       | _ =>
         match nth_choice cands (Nat.modulo ch (length cands)) with
-        | Some (_, TRNext tm') => trun p mdl sch fuel' (S step) tm'
+        | Some (_, TRNext tm') => trun p mdl sch fuel' (S step) (set_clock tm' (tm_clock tm' + 1))
         | Some (_, TRStuck w) => TRStuckRun w
         | _ => TRStuckRun "scheduler"
         end
@@ -515,7 +565,17 @@ Definition tm_of (s : mstate) : tmstate :=
   {| tm_heap := ms_heap s; tm_next := ms_next s; tm_statics := ms_statics s; tm_inited := ms_inited s;
      tm_initing := nil;
      tm_threads := [{| th_obj := -1; th_frames := ms_frames s; th_locks := ms_locks s; th_sync := nil;
-                       th_status := TRun |}] |}.
+                       th_status := TRun |}];
+     tm_clock := 0 |}.
+
+(** As [call_static_threads], from clock reading [clock0] (nanoseconds; currentTimeMillis is
+    [clock0 / 10^6]): a theorem chooses the time at which the run starts. *)
+Definition call_static_threads_at (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (clock0 : Z)
+           (cls name desc : string) (args : list value) : tresult :=
+  match entry_state cls name desc args with
+  | Some s => trun p mdl sch fuel O (set_clock (tm_of s) clock0)
+  | None => TRStuckRun "entry: bad descriptor or arguments"
+  end.
 
 Definition call_static_threads (p : program) (mdl : model) (sch : scheduler) (fuel : nat) (cls name desc : string)
            (args : list value) : tresult :=

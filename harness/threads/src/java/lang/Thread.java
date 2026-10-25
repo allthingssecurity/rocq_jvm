@@ -51,10 +51,18 @@ public class Thread implements Runnable {
     public final void join() throws InterruptedException { join0(); }
     public final void join(long millis) throws InterruptedException {
         if (millis < 0) throw new IllegalArgumentException("timeout value is negative");
-        if (millis == 0) join0(); else timedJoin0(millis);
+        if (millis == 0) { join0(); return; }
+        // as the JDK: wait on this Thread object, which the VM notifies when the thread ends
+        synchronized (this) {
+            long deadline = System.nanoTime() + millis * 1000000L;
+            while (isAlive()) {
+                long rem = deadline - System.nanoTime();
+                if (rem <= 0) return;
+                wait(Math.max(1, rem / 1000000L));
+            }
+        }
     }
     private native void join0();
-    private native void timedJoin0(long millis);
 
     public final boolean isAlive() { return isAlive0(); }
     private native boolean isAlive0();

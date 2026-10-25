@@ -122,6 +122,18 @@ Definition builtin_super (c : string) : option (option string) :=
   else if String.eqb c "java/lang/NumberFormatException" then Some (Some "java/lang/IllegalArgumentException")
   else if String.eqb c "java/lang/IllegalThreadStateException" then Some (Some "java/lang/IllegalArgumentException")
   else if String.eqb c "java/lang/InterruptedException" then Some (Some "java/lang/Exception")
+  else if String.eqb c "java/lang/ReflectiveOperationException" then Some (Some "java/lang/Exception")
+  else if String.eqb c "java/lang/ClassNotFoundException" then Some (Some "java/lang/ReflectiveOperationException")
+  else if String.eqb c "java/lang/NoSuchMethodException" then Some (Some "java/lang/ReflectiveOperationException")
+  else if String.eqb c "java/lang/NoSuchFieldException" then Some (Some "java/lang/ReflectiveOperationException")
+  else if String.eqb c "java/lang/IllegalAccessException" then Some (Some "java/lang/ReflectiveOperationException")
+  else if String.eqb c "java/lang/InstantiationException" then Some (Some "java/lang/ReflectiveOperationException")
+  else if String.eqb c "java/lang/reflect/InvocationTargetException" then Some (Some "java/lang/ReflectiveOperationException")
+  else if String.eqb c "java/lang/reflect/AccessibleObject" then Some (Some "java/lang/Object")
+  else if String.eqb c "java/lang/reflect/Executable" then Some (Some "java/lang/reflect/AccessibleObject")
+  else if String.eqb c "java/lang/reflect/Method" then Some (Some "java/lang/reflect/Executable")
+  else if String.eqb c "java/lang/reflect/Constructor" then Some (Some "java/lang/reflect/Executable")
+  else if String.eqb c "java/lang/reflect/Field" then Some (Some "java/lang/reflect/AccessibleObject")
   else if String.eqb c "java/util/NoSuchElementException" then RE
   else if String.eqb c "java/util/ConcurrentModificationException" then RE
   else if String.eqb c "java/lang/CloneNotSupportedException" then Some (Some "java/lang/Exception")
@@ -467,9 +479,20 @@ Inductive model_result : Type :=
 | MOk (ret : option value) (s : mstate)   (** the model may change heap/statics, never frames *)
 | MThrow (cls : string)
 | MStuckModel (why : string)
-| MNoModel.
+| MNoModel
+| MFrame (init : option string) (c : code) (locals : list value) (rt : option jtype) (s : mstate)
+    (** run the bytecode [c] (a frame of its own, with these arguments in its locals); what
+        it returns or throws is the result of the call. [init]: a class to initialise first
+        (the machine runs its initialisation and then executes the invoke again). Used by
+        models that call back into bytecode (reflection: Method.invoke,
+        Constructor.newInstance, Field.get/set). *)
+| MThrowObj (exn : Z) (s : mstate).
+    (** throw this (model-built) exception object *)
 
 Definition model := string -> string -> string -> list value -> mstate -> model_result.
+
+(** The synthetic method of an [MFrame]. *)
+Definition model_method (c : code) : method := {| m_name := "<model>"; m_desc := "()V"; m_access := 8; m_code := Some c |}.
 
 (** The models of this phase (see TRUST.md, "Axiomatised natives"):
     the no-argument constructors of [Object] and of the java.lang exception
@@ -1023,6 +1046,16 @@ Definition NSME := "java/lang/NoSuchMethodError".
 Definition NSFE := "java/lang/NoSuchFieldError".
 Definition IAE := "java/lang/IllegalAccessError".
 
+(** A linkage error (no such method/field, abstract method, ...) on a member referenced through a
+    JDK class: the code was compiled against the real JDK, which has the member, so the error can
+    only come from a model class (harness/jdkmodel, harness/threads) that lacks it.  The machine
+    makes no claim then, instead of throwing an error HotSpot would not throw. *)
+Definition is_jdk_class (c : string) : bool :=
+  String.prefix "java/" c || String.prefix "javax/" c || String.prefix "jdk/" c || String.prefix "sun/" c.
+Definition link_error (p : program) (s : mstate) (c e : string) : mstep :=
+  if is_jdk_class c then MStuck ("the JDK model lacks a member of " ++ c ++ " (" ++ e ++ ")")
+  else throw_new p s e.
+
 Definition resolve_method (p : program) (imr : bool) (c name desc : string) : rres :=
   match class_info p c with
   | CIUnknown => RUnknown
@@ -1408,6 +1441,20 @@ Definition concat_recipe (cf : classfile) (bi : Z) : option (list Z * list (list
 (** String conversion of one concatenation argument (String.valueOf rules for
     the primitive types, String and null; anything that needs a toString()
     call back into bytecode, or float/double, is not modelled yet). *)
+(** toString of a box (Integer, Long, Short, Byte, Character, Boolean: final JDK classes) or of a
+    StringBuilder. *)
+Definition box_string (o : object) : option (list Z) :=
+  match o with
+  | OObj c [("value", VInt z)] =>
+      if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Short" || String.eqb c "java/lang/Byte" then Some (z_units z)
+      else if String.eqb c "java/lang/Character" then Some [z]
+      else if String.eqb c "java/lang/Boolean" then Some (if z =? 0 then [102; 97; 108; 115; 101] else [116; 114; 117; 101])
+      else None
+  | OObj c [("value", VLong z)] => if String.eqb c "java/lang/Long" then Some (z_units z) else None
+  | OSb u => Some u
+  | _ => None
+  end.
+
 Definition concat_arg (h : heap) (t : jtype) (v : value) : string + list Z :=
   match t, v with
   | (TInt | TByte | TShort), VInt z => inr (z_units z)
@@ -1418,7 +1465,11 @@ Definition concat_arg (h : heap) (t : jtype) (v : value) : string + list Z :=
   | (TRef _ | TArr _), VRef l =>
       match h l with
       | Some (OStr u) => inr u
-      | _ => inl "string concat: argument needs toString() (callback not modelled yet)"
+      | Some o => match box_string o with
+                  | Some u => inr u
+                  | None => inl "string concat: argument needs toString() (callback not modelled yet)"
+                  end
+      | None => inl "string concat: argument needs toString() (callback not modelled yet)"
       end
   | _, _ => inl "string concat: float/double argument (Phase 5) or type mismatch"
   end.
@@ -1481,6 +1532,18 @@ Definition invoke_frame_go (top : cframe) (rest : list cframe) (nx : pc) (st' : 
   then MNext (with_frames s' (set_frame top (mkframe nx st' (f_locals (cf_frame top))) :: rest))
   else MStuck "operand stack overflow (max_stack)".
 
+(** Push the frame of a model's bytecode ([MFrame]); its value returns to the invoking frame. *)
+Definition model_frame (top : cframe) (rest : list cframe) (r : list value) (nx : pc) (c : code) (ls : list value)
+           (rt : option jtype) (s' : mstate) : mstep :=
+  match init_frame c ls with
+  | Some f =>
+      let caller := set_frame top (mkframe (f_pc (cf_frame top)) r (f_locals (cf_frame top))) in
+      MNext (with_frames s' ({| cf_class := "<model>"; cf_method := model_method c; cf_code := c; cf_rt := rt;
+                                cf_frame := f; cf_resume := None; cf_clinit := false |}
+                             :: set_resume caller (Some nx) :: rest))
+  | None => MStuck "model frame: locals"
+  end.
+
 Definition invoke_run_model (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
            (mr : methodref) (args r : list value) (nx : pc) (cls : string) : mstep :=
   match mdl cls (mr_name mr) (mr_desc mr) args s with
@@ -1489,7 +1552,16 @@ Definition invoke_run_model (p : program) (mdl : model) (s : mstate) (top : cfra
   | MThrow cn => throw_new p s cn
   | MStuckModel why => MStuck why
   | MNoModel => MStuck ("no model for " ++ cls ++ "." ++ mr_name mr ++ mr_desc mr)
+  | MFrame (Some d) c ls rt s' =>
+      if erroneous p 64 (ms_statics s) d then ncdfe p s d
+      else match init_needed p 64 (ms_inited s) d with
+           | Some _ => init_class p s d
+           | None => model_frame top rest r nx c ls rt s'
+           end
+  | MFrame None c ls rt s' => model_frame top rest r nx c ls rt s'
+  | MThrowObj e s' => throw_obj p (with_frames s' (ms_frames s)) e
   end.
+
 
 (** LambdaMetafactory's adaptation of the arguments to the implementation
     method's parameter types: a box passed for a primitive parameter is unboxed
@@ -1504,25 +1576,51 @@ Definition box_prim (c : string) : option jtype :=
 
 Definition is_prim (t : jtype) : bool := match t with TRef _ | TArr _ => false | _ => true end.
 
+(** A primitive value of type [a] passed where the implementation expects [t]: unchanged, or
+    widened as LambdaMetafactory's widening conversions do (JLS 5.1.2); [None] otherwise. *)
+Definition widen_val (a t : jtype) (v : value) : option value :=
+  match a, t with
+  | (TByte | TShort | TChar | TInt | TBool), (TByte | TShort | TChar | TInt | TBool) =>
+      match v with VInt _ => Some v | _ => None end
+  | (TByte | TShort | TChar | TInt), TLong => conv_int I2L v
+  | (TByte | TShort | TChar | TInt), TFloat => conv_int I2F v
+  | (TByte | TShort | TChar | TInt), TDouble => conv_int I2D v
+  | TLong, TFloat => conv_int L2F v
+  | TLong, TDouble => conv_int L2D v
+  | TFloat, TDouble => conv_int F2D v
+  | TLong, TLong => match v with VLong _ => Some v | _ => None end
+  | TFloat, TFloat => match v with VFloat _ => Some v | _ => None end
+  | TDouble, TDouble => match v with VDouble _ => Some v | _ => None end
+  | _, _ => None
+  end.
+
+Definition val_jtype (v : value) : option jtype :=
+  match v with VInt _ => Some TInt | VLong _ => Some TLong | VFloat _ => Some TFloat
+             | VDouble _ => Some TDouble | _ => None end.
+
 Fixpoint lam_adapt (h : heap) (ts : list jtype) (vs : list value) : option (option (list value)) :=
   match ts, vs with
   | nil, nil => Some (Some nil)
   | t :: ts', v :: vs' =>
       let rest := lam_adapt h ts' vs' in
+      let cons_w := fun w => match rest with Some (Some ws) => Some (Some (w :: ws)) | r => r end in
       match is_prim t, v with
       | true, VRef l =>
+          (* unboxing, then widening (e.g. an Integer passed to a long parameter) *)
           match h l with
           | Some (OObj c [("value", w)]) =>
               match box_prim c with
-              | Some bt => if String.eqb (type_desc bt) (type_desc t)
-                           then match rest with Some (Some ws) => Some (Some (w :: ws)) | r => r end
-                           else None
+              | Some bt => match widen_val bt t w with Some w' => cons_w w' | None => None end
               | None => None
               end
           | _ => None
           end
       | true, VNull => match rest with None => None | _ => Some None end
-      | true, _ => match rest with Some (Some ws) => Some (Some (v :: ws)) | r => r end
+      | true, _ =>
+          match val_jtype v with
+          | Some a => match widen_val a t v with Some w' => cons_w w' | None => None end
+          | None => None
+          end
       | false, (VRef _ | VNull) => match rest with Some (Some ws) => Some (Some (v :: ws)) | r => r end
       | false, _ => None
       end
@@ -1534,6 +1632,164 @@ Definition same_ret_kind (a b : option jtype) : bool :=
   | None, None => true
   | Some x, Some y => if is_prim x || is_prim y then String.eqb (type_desc x) (type_desc y) else true
   | _, _ => false
+  end.
+
+(** ** LambdaMetafactory's conversions, by an adapter frame.
+    When the implementation method's types differ from the interface method's in a way the
+    direct call cannot absorb (boxing, unboxing, primitive widening, a cast, a dropped result),
+    the call runs synthetic bytecode that converts the arguments, calls the implementation and
+    converts the result, as the class LambdaMetafactory spins does. *)
+Definition tk_of (t : jtype) : tkind :=
+  match t with TLong => KL | TFloat => KF | TDouble => KD | TRef _ | TArr _ => KA | _ => KI end.
+
+Definition box_class_of (t : jtype) : option string :=
+  match t with
+  | TInt => Some "java/lang/Integer" | TLong => Some "java/lang/Long" | TBool => Some "java/lang/Boolean"
+  | TChar => Some "java/lang/Character" | TShort => Some "java/lang/Short" | TByte => Some "java/lang/Byte"
+  | TFloat => Some "java/lang/Float" | TDouble => Some "java/lang/Double"
+  | _ => None
+  end.
+
+Definition unbox_name (t : jtype) : string :=
+  match t with
+  | TInt => "intValue" | TLong => "longValue" | TBool => "booleanValue" | TChar => "charValue"
+  | TShort => "shortValue" | TByte => "byteValue" | TFloat => "floatValue" | TDouble => "doubleValue"
+  | _ => ""
+  end.
+
+Definition widen (a b : jtype) : option (list instr) :=
+  match a, b with
+  | (TByte | TShort | TChar | TInt), TInt => Some nil
+  | TByte, TShort => Some nil
+  | (TByte | TShort | TChar | TInt), TLong => Some [Conv I2L]
+  | (TByte | TShort | TChar | TInt), TFloat => Some [Conv I2F]
+  | (TByte | TShort | TChar | TInt), TDouble => Some [Conv I2D]
+  | TLong, TFloat => Some [Conv L2F]
+  | TLong, TDouble => Some [Conv L2D]
+  | TFloat, TDouble => Some [Conv F2D]
+  | _, _ => if String.eqb (type_desc a) (type_desc b) then Some nil else None
+  end.
+
+Definition cast_to (t : jtype) : list instr :=
+  match t with
+  | TRef c => if String.eqb c "java/lang/Object" then nil else [Checkcast c]
+  | TArr _ => [Checkcast (type_desc t)]
+  | _ => nil
+  end.
+
+(** Code that converts a value of type [a] on the stack to type [b]. *)
+Definition lam_conv (a b : jtype) : option (list instr) :=
+  match is_prim a, is_prim b with
+  | true, true => widen a b
+  | true, false =>
+      match box_class_of a with
+      | Some bc => Some (Invoke InvStatic {| mr_class := bc; mr_name := "valueOf"; mr_desc := "(" ++ type_desc a ++ ")L" ++ bc ++ ";";
+                                             mr_interface := false |} :: cast_to b)
+      | None => None
+      end
+  | false, true =>
+      (* the reference is cast to the wrapper of [b] and unboxed (from a known box type: its
+         own wrapper, then widened) *)
+      let src := match a with
+                 | TRef c => match box_prim c with Some t => if String.eqb (type_desc t) (type_desc b) then None else Some t | None => None end
+                 | _ => None
+                 end in
+      match src with
+      | Some t => match box_class_of t, widen t b with
+                  | Some bc, Some w => Some (app [Invoke InvVirtual {| mr_class := bc; mr_name := unbox_name t; mr_desc := "()" ++ type_desc t; mr_interface := false |}] w)
+                  | _, _ => None
+                  end
+      | None => match box_class_of b with
+                | Some bc => Some [Checkcast bc; Invoke InvVirtual {| mr_class := bc; mr_name := unbox_name b; mr_desc := "()" ++ type_desc b; mr_interface := false |}]
+                | None => None
+                end
+      end
+  | false, false => Some (cast_to b)
+  end.
+
+Fixpoint lam_args (ts_from ts_to : list jtype) (k : Z) : option (list instr) :=
+  match ts_from, ts_to with
+  | nil, nil => Some nil
+  | a :: ra, b :: rb =>
+      match lam_conv a b, lam_args ra rb (k + (match a with TLong | TDouble => 2 | _ => 1 end)) with
+      | Some c, Some rest => Some (Load (tk_of a) k :: app c rest)
+      | _, _ => None
+      end
+  | _, _ => None
+  end.
+
+Fixpoint number_instrs (l : list instr) (k : Z) : list (pc * instr) :=
+  match l with nil => nil | i :: r => (k, i) :: number_instrs r (k + 1) end.
+
+(** The adapter: locals = captured values then the interface method's arguments; [cts] the
+    captured values' types (the implementation's leading parameter types). *)
+Definition lam_adapter (kind : Z) (impl : methodref) (ips : list jtype) (irt : option jtype)
+           (cts : list jtype) (sps : list jtype) (srt : option jtype) : option code :=
+  let from := app cts sps in
+  match invoke_kind_of_ref kind, lam_args from ips 0 with
+  | Some k', Some ld =>
+      let call := Invoke k' impl in
+      let ret := match irt, srt with
+                 | None, None => Some [Return None]
+                 | Some a, None => Some [match a with TLong | TDouble => Pop2 | _ => Pop end; Return None]
+                 | Some a, Some b => match lam_conv a b with Some c => Some (app c [Return (Some (tk_of b))]) | None => None end
+                 | None, Some _ => None
+                 end in
+      match ret with
+      | Some rt =>
+          let body := app ld (call :: rt) in
+          let nl := fold_left (fun n t => n + match t with TLong | TDouble => 2 | _ => 1 end) from 0 in
+          Some {| c_max_stack := 2 * nl + 6; c_max_locals := nl; c_length := Z.of_nat (length body);
+                  c_instrs := number_instrs body 0; c_handlers := nil |}
+      | None => None
+      end
+  | _, _ => None
+  end.
+
+(** String concatenation whose arguments need [toString()] (or another conversion that the
+    direct computation [concat_units] does not do): the same text built by bytecode, a
+    StringBuilder appended with each constant character and each argument in recipe order (as
+    String.valueOf, which StringConcatFactory uses, for an object). *)
+Definition sb_mr (name desc : string) : methodref :=
+  {| mr_class := "java/lang/StringBuilder"; mr_name := name; mr_desc := desc; mr_interface := false |}.
+Definition append_desc (t : jtype) : string :=
+  match t with
+  | TLong => "(J)" | TFloat => "(F)" | TDouble => "(D)" | TChar => "(C)" | TBool => "(Z)"
+  | TRef _ | TArr _ => "(Ljava/lang/Object;)" | _ => "(I)"
+  end ++ "Ljava/lang/StringBuilder;".
+Definition jsize (t : jtype) : Z := match t with TLong | TDouble => 2 | _ => 1 end.
+Definition append_chars (u : list Z) : list instr :=
+  flat_map (fun c => [Iconst c; Invoke InvVirtual (sb_mr "append" "(C)Ljava/lang/StringBuilder;")]) u.
+Fixpoint concat_body (fuel : nat) (recipe : list Z) (consts : list (list Z)) (ps : list jtype) (slot : Z)
+  : option (list instr) :=
+  match fuel with
+  | O => None
+  | S k =>
+    match recipe with
+    | nil => Some nil
+    | 1 :: r => match ps with
+                | t :: ps' => match concat_body k r consts ps' (slot + jsize t) with
+                              | Some b => Some (Load (tk_of t) slot :: Invoke InvVirtual (sb_mr "append" (append_desc t)) :: b)
+                              | None => None
+                              end
+                | nil => None
+                end
+    | 2 :: r => match consts with
+                | c :: cs => option_map (app (append_chars c)) (concat_body k r cs ps slot)
+                | nil => None
+                end
+    | c :: r => option_map (app (append_chars [c])) (concat_body k r consts ps slot)
+    end
+  end.
+Definition concat_code (recipe : list Z) (consts : list (list Z)) (ps : list jtype) : option code :=
+  match concat_body (S (length recipe)) recipe consts ps 0 with
+  | Some b =>
+      let body := app [New "java/lang/StringBuilder"; Dup; Invoke InvSpecial (sb_mr "<init>" "()V")]
+                      (app b [Invoke InvVirtual (sb_mr "toString" "()Ljava/lang/String;"); Return (Some KA)]) in
+      let nl := fold_left (fun n t => n + jsize t) ps 0 in
+      Some {| c_max_stack := 6; c_max_locals := nl; c_length := Z.of_nat (length body);
+              c_instrs := number_instrs body 0; c_handlers := nil |}
+  | None => None
   end.
 
 (** Virtual / interface / special call on the object [ho] found at the receiver.
@@ -1552,9 +1808,20 @@ Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref 
         | Some (ips, irt), Some (_, srt) =>
         let ips' := if (kind =? 6) || (kind =? 8) then ips else TRef (mr_class impl) :: ips in
         let irt' := if kind =? 8 then Some (TRef (mr_class impl)) else irt in
-        if negb (same_ret_kind irt' srt) then MStuck "lambda: return value conversion not modelled" else
+        let adapter :=
+            (* the conversions LambdaMetafactory adds, run as bytecode (not for Foo::new) *)
+            match parse_mdesc (mr_desc mr) with
+            | Some (sps, _) =>
+                let ncap := length cap in
+                match lam_adapter kind impl ips' irt' (firstn ncap ips') sps srt with
+                | Some c => model_frame top rest r nx c (app cap more) srt s
+                | None => MStuck "lambda: conversion not modelled"
+                end
+            | None => MStuck "lambda: descriptor"
+            end in
+        if negb (same_ret_kind irt' srt) then (if kind =? 8 then MStuck "lambda: return value conversion not modelled" else adapter) else
         match lam_adapt (ms_heap s) ips' (app cap more) with
-        | None => MStuck "lambda: argument conversion not modelled"
+        | None => if kind =? 8 then MStuck "lambda: argument conversion not modelled" else adapter
         | Some None => throw_new p s NPE
         | Some (Some args') =>
         match invoke_kind_of_ref kind with
@@ -1627,7 +1894,7 @@ Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref 
               | SelThrow e =>
                   (* a loaded model class of a JDK class may leave a method to the Rocq model *)
                   match mdl (mr_class mr) (mr_name mr) (mr_desc mr) args s with
-                  | MNoModel => throw_new p s e
+                  | MNoModel => link_error p s (mr_class mr) e
                   | _ => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
                   end
               | SelStuck why => MStuck why
@@ -1666,7 +1933,7 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
             (* a loaded model class of a JDK class (harness/jdkmodel) may leave a
                method to the Rocq model of that class *)
             match mdl (mr_class mr) (mr_name mr) (mr_desc mr) args s with
-            | MNoModel => throw_new p s e
+            | MNoModel => link_error p s (mr_class mr) e
             | _ => if erroneous p 64 (ms_statics s) (mr_class mr) then throw_new p s "java/lang/NoClassDefFoundError"
                    else match init_needed p 64 (ms_inited s) (mr_class mr) with
                         | Some _ => init_class p s (mr_class mr)
@@ -1694,7 +1961,7 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
              method of a class the machine does not know is assumed to resolve
              (the JDK the code was compiled against) *)
           match resolve_method p (mr_interface mr) (mr_class mr) (mr_name mr) (mr_desc mr) with
-          | RThrow e => throw_new p s e
+          | RThrow e => link_error p s (mr_class mr) e
           | RFound (_, a, _) => if acc_static a then throw_new p s ICCE else throw_new p s NPE
           | RUnknown => throw_new p s NPE
           end
@@ -2189,7 +2456,7 @@ Definition indy_other (p : program) (s : mstate) (top : cframe) (rest : list cfr
     to resolve. *)
 Definition instance_field_error (p : program) (s : mstate) (fr : fieldref) (otherwise : string) : mstep :=
   match resolve_field p fr with
-  | FNotFound => throw_new p s NSFE
+  | FNotFound => link_error p s (fr_class fr) NSFE
   | FFound _ a => if acc_static a then throw_new p s ICCE
                   else if String.eqb otherwise NPE then throw_new p s NPE else MStuck otherwise
   | FUnknown => if String.eqb otherwise NPE then throw_new p s NPE else MStuck otherwise
@@ -2247,7 +2514,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                                | Some v => go (v :: r) s
                                | None => instance_field_error p s fr "getfield: the object has no such field"
                                end
-                | FSThrow e => throw_new p s e
+                | FSThrow e => link_error p s (fr_class fr) e
                 | FSStuck why => MStuck why
                 end
             | _ => MStuck "getfield: not an object"
@@ -2270,7 +2537,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                                 ms_locks := ms_locks s; ms_frames := ms_frames s |}
                     | None => instance_field_error p s fr "putfield: the object has no such field"
                     end
-                | FSThrow e => throw_new p s e
+                | FSThrow e => link_error p s (fr_class fr) e
                 | FSStuck why => MStuck why
                 end
             | _ => MStuck "putfield: not an object"
@@ -2285,7 +2552,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             | None => MStuck "getstatic: static field not set"
             end
         | STInit d => init_class p s d
-        | STThrow e => throw_new p s e
+        | STThrow e => link_error p s (fr_class fr) e
         | STNcdfe d => ncdfe p s d
         | STJdk d =>
             (* a static field of a JDK class: its model, as a pseudo-method "<get>name" *)
@@ -2312,7 +2579,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
           | _, _ => MStuck "putstatic: operand"
           end
         | STInit d => init_class p s d
-        | STThrow e => throw_new p s e
+        | STThrow e => link_error p s (fr_class fr) e
         | STNcdfe d => ncdfe p s d
         | STJdk d => MStuck ("putstatic to a static field of a JDK class: " ++ d ++ "." ++ fr_name fr)
         | STStuck why => MStuck why
@@ -2478,7 +2745,10 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
               | Some (args, r) =>
                   match concat_units h recipe consts ps args with
                   | inr u => let (l, s') := alloc s (OStr u) in go (VRef l :: r) s'
-                  | inl why => MStuck why
+                  | inl why => match concat_code recipe consts ps with
+                               | Some c => model_frame top rest r nx c args (Some (TRef "java/lang/String")) s
+                               | None => MStuck why
+                               end
                   end
               | None => MStuck "invokedynamic: operand stack"
               end
