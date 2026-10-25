@@ -59,6 +59,7 @@ theories/Camel/WalSpec.v
 theories/Camel/WalCanUpdate.v
 theories/Camel/WalScenario.v
 theories/Camel/CimHash.v
+theories/Camel/CimAscii.v
 theories/Camel/CimSpec.v
 theories/Camel/CimProg.v
 theories/Camel/CimScenario.v
@@ -70,11 +71,13 @@ theories/Camel/CimRemove.v
 theories/Camel/CimCompact.v
 theories/Camel/CimPut3.v
 theories/Camel/CimAbs.v
+theories/Camel/CimAsciiMap.v
 theories/Camel/CimAbs2.v
 theories/Camel/CimMap.v
 theories/Camel/CimMap2.v
 theories/Camel/CimMap3.v
 theories/Camel/CimSession.v
+theories/Camel/CimSessionAscii.v
 theories/Camel/WalUpdate.v
 theories/Camel/WalUpdateSpec.v
 theories/Camel/WalAdd.v
@@ -85,3 +88,12 @@ theories/Concurrency/Executions.v
 theories/Concurrency/DRF.v
 theories/Concurrency/Examples.v
 theories/Extract.v
+theories/Classes/BugsMain_FilterIterator.v
+theories/Classes/BugsMain_TimeUtils.v
+theories/Classes/BugsMain.v
+theories/Classes/BugsScenario_FilterScenario_Backing.v
+theories/Classes/BugsScenario_FilterScenario.v
+theories/Classes/BugsScenario.v
+theories/Classes/BugsJdk_Duration.v
+theories/Classes/BugsJdk.v
+theories/Camel/NewBugs.v

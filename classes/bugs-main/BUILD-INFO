@@ -1,0 +1,7 @@
+label: bugs-main
+commit: bd4d2ba20d6a268b66949712d00073069a8e333d
+module: core/camel-util/src/main/java
+javac: javac 21.0.11 --release 17 -g
+sha256:
+  1c5f424ddbcd0a59e02824b3f25e7e4329a67bba886f9559f4ccc8c5ef839371  org/apache/camel/util/FilterIterator.class
+  381c104997aa3c5ce1307bcbec75920acd123f7424306106d75bd934bd52b115  org/apache/camel/util/TimeUtils.class

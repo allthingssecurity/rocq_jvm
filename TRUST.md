@@ -81,3 +81,16 @@ Not modelled on purpose: `Object.hashCode`/`identityHashCode` (nondeterministic)
   Class initialisation itself is covered by the scenario theorems, not by the unbounded ones.
 - The Unicode facts of `CimSpec.jdk_facts` and of `cih_inconsistent_supplementary` are hypotheses of the
   theorems, not axioms; `harness/check_unicode_facts.py` checks them against the JDK 21 tables.
+- `CimAscii.ascii_key_laws` instead proves symmetry, transitivity and hash consistency for ASCII keys
+  without any Unicode-table hypotheses, for every `jenv`. Its finite character-pair lemma is checked
+  by `vm_compute`; induction extends it to strings of arbitrary length. `ascii_bytecode_hash`
+  composes this with the existing real-bytecode theorem, retaining the heap and INT_MAX string-length
+  preconditions. `CimAsciiMap.ascii_find_correct` instantiates the existing abstract lookup theorem;
+  it still requires the table and key representation invariants, and does not cover map resize or sessions.
+- `NewBugs.v` uses unchanged Camel `FilterIterator`/`TimeUtils` class files at `bd4d2ba20d6a`.
+  Its FilterIterator witness supplies a small ordinary iterator driver (also checked directly as a control);
+  HotSpot independently reproduces the defect using JDK ArrayList. Its TimeUtils witness supplies a valid
+  normalized Duration heap object and an initialized Duration class, then executes the actual OpenJDK
+  21.0.11 Duration getter bytecode. Duration construction/class initialization are outside that witness.
+  The existing SLF4J model handles TimeUtils's logger initialization. These are finite counterexamples,
+  not universal API proofs; they add no native model or axioms.

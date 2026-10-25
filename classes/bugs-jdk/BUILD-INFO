@@ -1,0 +1,4 @@
+label: bugs-jdk
+module: real OpenJDK 21.0.11 java.base.jmod, Duration.class (not a hand model)
+sha256:
+  eda56befeeb5058145281a7a9c87ae11ff11c00ab02d4de032bb6b163c385ea2  java/time/Duration.class
