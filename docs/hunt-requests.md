@@ -84,16 +84,16 @@ TreeMap in `harness/jdkmodel` (like HashMap) would do.
 
 ## Status (model session, updated 2026-10-25)
 
-Branch `thread-layer` on GitHub (first push `e8212b2`), merged into `main` once the full proof rebuild is green.
+On GitHub `main` since `8a1d67c` (full proof rebuild green, no axioms).
 
 | Request | State | Differential tests vs HotSpot |
 |---|---|---|
 | R1 thread layer | `Core/Threads.v`: `call_static_threads`, `call_static_threads_at` (start clock), `harness/threads/`, `classes/threadmodel`, `harness/threads_main.ml` | 18 thread programs × 300 inputs × 6 schedules: 0 mismatches |
 | R2 ReentrantLock, Lock, Condition | model class, non-fair (`ReentrantLock(true)` is STUCK); needs the thread layer (`Thread.currentThread`) even for sequential code | in the thread corpus: 0 mismatches |
-| R3 atomics | AtomicInteger/Long/Boolean/Reference; the `Number.<init>` regression is fixed | rerun pending |
-| R4 clock | nanoTime / currentTimeMillis from the run's clock: start chosen by `call_static_threads_at`, +1 ns per step, jumps to the earliest deadline when every thread waits; `Thread.sleep(ms)` now ends only once ms have passed, so a driver makes time pass by sleeping | pending |
-| R5 timers, executors | Executors fixed/single/cached, FutureTask, `ScheduledThreadPoolExecutor` (schedule, fixed rate, fixed delay, cancel, shutdown policies; not a subclass of ThreadPoolExecutor), `Timer`/`TimerTask` | HotSpot side checked; model side pending |
+| R3 atomics | AtomicInteger/Long/Boolean/Reference; the `Number.<init>` regression is fixed | ConcTests 9 targets × 50 inputs × 6 schedules: 0 mismatches |
+| R4 clock | nanoTime / currentTimeMillis from the run's clock: start chosen by `call_static_threads_at`, +1 ns per step, jumps to the earliest deadline when every thread waits; `Thread.sleep(ms)` now ends only once ms have passed, so a driver makes time pass by sleeping | SchedTests (timed waits, sleeps): 0 mismatches |
+| R5 timers, executors | Executors fixed/single/cached, FutureTask, `ScheduledThreadPoolExecutor` (schedule, fixed rate, fixed delay, cancel, shutdown policies; not a subclass of ThreadPoolExecutor), `Timer`/`TimerTask` | ExecTests 6 targets × 50 and SchedTests timer/scheduler targets × 30, × 6 schedules: 0 mismatches |
 | R6 ConcurrentHashMap | model class: bins locked on their first node, tree bins, resize with forwarding nodes, views, compute*/merge incl. "Recursive update". A mapping function that changes the map and triggers a resize is STUCK (the Javadoc forbids it) | 7 single-thread targets × 300 inputs: 0 mismatches; 7 thread targets × 50 inputs × 6 schedules: 0 mismatches |
-| R7 Semaphore, DelayQueue | both model classes (fair and non-fair Semaphore incl. reducePermits from a subclass; DelayQueue with the PriorityQueue heap order) | HotSpot side checked; model side pending |
-| R8 TreeSet/TreeMap | model classes (sorted array; navigation, views, fail-fast iterators; subMap/headMap/tailMap STUCK); CountDownLatch done | pending |
+| R7 Semaphore, DelayQueue | both model classes (fair and non-fair Semaphore incl. reducePermits from a subclass; DelayQueue with the PriorityQueue heap order) | SchedTests semaphore and DelayQueue targets × 30 × 6 schedules: 0 mismatches |
+| R8 TreeSet/TreeMap | model classes (sorted array; navigation, views, fail-fast iterators; subMap/headMap/tailMap STUCK); CountDownLatch done | TreeOps 3 targets × 300: 0 mismatches |
 | R9 String.format | not yet | |

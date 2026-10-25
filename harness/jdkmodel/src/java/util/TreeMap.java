@@ -101,7 +101,21 @@ public class TreeMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, 
 
     @SuppressWarnings("unchecked")
     final int compare(Object k1, Object k2) {
+        if (comparator == null && k2 != null && isJdkComparable(k1) && k1.getClass() != k2.getClass()) {
+            // the bridge compareTo(Object) of String and the boxes casts its argument first
+            String a = k2.getClass().getName(), b = k1.getClass().getName();
+            String where = isJdkComparable(k2)
+                ? " (" + a + " and " + b + " are in module java.base of loader 'bootstrap')"
+                : null;
+            if (where == null) throw ModelStuck.unsupported("TreeMap: ClassCastException message for a user class");
+            throw new ClassCastException("class " + a + " cannot be cast to class " + b + where);
+        }
         return comparator == null ? ((Comparable<Object>) k1).compareTo(k2) : comparator.compare((K) k1, (K) k2);
+    }
+
+    private static boolean isJdkComparable(Object x) {
+        return x instanceof String || x instanceof Integer || x instanceof Long || x instanceof Short
+            || x instanceof Byte || x instanceof Character || x instanceof Boolean;
     }
 
     /** Index of key, or -(insertion point) - 1. */
