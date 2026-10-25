@@ -1,0 +1,14 @@
+javac: Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=42367 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+javac 21.0.12.1
+271f21f3ee7a589ab4b3230a0958da5571b65a5bc70c49e49804c28b5db36eca  ./java/lang/Thread.class
+25649ec54b45ceda23238a4aa1bbfb98259e03edcf80287a815e6b53d2462972  ./java/lang/ThreadLocal$SuppliedThreadLocal.class
+993f6872d8a3dd73aa612894df22c8bc808ff1b04dfdfcef54e4d1fc83254865  ./java/lang/ThreadLocal.class
+daa119b3b33f5841372fa4a3e50c74259a216768806fd21f5f38808e62842b0b  ./java/util/concurrent/CountDownLatch.class
+a33b3fde56caa839d8cc319cc835af50b54786737815ff13c6cb2a89a2919dd5  ./java/util/concurrent/atomic/AtomicBoolean.class
+6a14dc3e89ff19a06f1c92ad4d34854d43f56af12a7ab41b677c14f955e30f47  ./java/util/concurrent/atomic/AtomicInteger.class
+60d5b8a1c88da782827d4bed61d81e01fc442cbafd69a699377fe124b49ee321  ./java/util/concurrent/atomic/AtomicLong.class
+4903dce114bc135f1bc97127c4554090fe167c4a2a11a695340e28f5e796e10a  ./java/util/concurrent/atomic/AtomicReference.class
+df7d38327c2f77da6d9068e270bf8d59c57983380a374b39da451a9c987e3f09  ./java/util/concurrent/locks/Condition.class
+8f604ab2882249c24796bba52c571ee7fc28dada3d830c26ec05d173a9ae0cfe  ./java/util/concurrent/locks/Lock.class
+adf96dc3919273effbd9d73fe1731851696bb3efc57786887b196155d8e855be  ./java/util/concurrent/locks/ReentrantLock$Cond.class
+222ce64568fb24a27ecdeb7d432e3de8076234dff82be46333be5fb73a7e7f46  ./java/util/concurrent/locks/ReentrantLock.class

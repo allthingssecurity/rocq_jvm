@@ -6,7 +6,7 @@
     segment per loop iteration (proved by symbolic execution, [sym_step]) and
     induction over the iterations. *)
 
-From Stdlib Require Import ZArith String List Bool Lia.
+From Stdlib Require Import ZArith String Ascii List Bool Lia.
 From JVM.Core Require Import Int Instr Desc Semantics Machine.
 From JVM.Loader Require Import ClassFile.
 Import ListNotations.
@@ -153,7 +153,7 @@ Lemma do_invoke_string_model : forall p mdl s top rest k mr l u more r nx v s',
 Proof.
   intros p mdl s top rest k mr l u more r nx v s' Hk Hh Hr Hu Hm st' Hb.
   assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest k mr l more (ms_heap s l) r nx)
     by (destruct Hk as [-> | ->]; reflexivity).
   rewrite E, Hh. unfold invoke_obj.
@@ -162,6 +162,57 @@ Proof.
 Qed.
 
 (** ** Step lemmas for heap instructions and calls into bytecode *)
+(** Objects whose field keys contain no '.': no field is shadowed, so a field is found by its
+    plain name (Machine.field_slot). *)
+Fixpoint has_dot (k : string) : bool :=
+  match k with EmptyString => false | String c r => Ascii.eqb c "."%char || has_dot r end.
+
+Lemma get_has_dot : forall k i, String.get i k = Some "."%char -> has_dot k = true.
+Proof.
+  induction k as [|c r IH]; intros i H; [destruct i; discriminate|].
+  destruct i as [|i]; cbn in H |- *.
+  - injection H as ->. reflexivity.
+  - rewrite (IH i H). apply Bool.orb_true_r.
+Qed.
+
+Lemma qual_nodot : forall x k, has_dot k = false -> qual_of x k = false.
+Proof.
+  intros x k Hk. unfold qual_of.
+  destruct (Nat.ltb (S (String.length x)) (String.length k)) eqn:H1; [|reflexivity]. cbn [andb].
+  destruct (String.eqb_spec (substring (String.length k - S (String.length x)) (S (String.length x)) k) (String "." x)) as [E|E];
+    [|reflexivity].
+  exfalso. assert (G : String.get 0 (substring (String.length k - S (String.length x)) (S (String.length x)) k) = Some "."%char)
+    by (rewrite E; reflexivity).
+  rewrite substring_correct1 in G by lia. apply get_has_dot in G. congruence.
+Qed.
+
+Definition no_dots (fs : list (string * value)) : bool := forallb (fun kv => negb (has_dot (fst kv))) fs.
+
+Lemma field_slot_nodots : forall p fr fs, no_dots fs = true -> field_slot p fr fs = FSKey (fr_name fr).
+Proof.
+  intros p fr fs H. unfold field_slot.
+  replace (existsb (fun kv => qual_of (fr_name fr) (fst kv)) fs) with false; [reflexivity|].
+  symmetry. induction fs as [|[k v] r IH]; [reflexivity|]. cbn [no_dots forallb existsb fst] in H |- *.
+  apply andb_true_iff in H as (H1 & H2). rewrite qual_nodot by (destruct (has_dot k); [discriminate | reflexivity]).
+  apply IH. exact H2.
+Qed.
+
+Lemma obj_get_nodots : forall p fr fs, no_dots fs = true -> obj_get p fr fs = assoc (fr_name fr) fs.
+Proof. intros p fr fs H. unfold obj_get. rewrite field_slot_nodots by exact H. reflexivity. Qed.
+
+Lemma obj_set_nodots : forall p fr v fs, no_dots fs = true -> obj_set p fr v fs = set_assoc (fr_name fr) v fs.
+Proof. intros p fr v fs H. unfold obj_set. rewrite field_slot_nodots by exact H. reflexivity. Qed.
+
+Lemma no_dots_set : forall k v fs fs', no_dots fs = true -> set_assoc k v fs = Some fs' -> no_dots fs' = true.
+Proof.
+  intros k v fs. induction fs as [|[k' v'] r IH]; intros fs' H E; cbn in E; [discriminate|].
+  cbn [no_dots forallb fst] in H. apply andb_true_iff in H as (H1 & H2).
+  destruct (String.eqb k k') eqn:Ek.
+  - injection E as <-. cbn [no_dots forallb fst]. rewrite H1, H2. reflexivity.
+  - destruct (set_assoc k v r) as [r'|] eqn:Er; cbn [option_map] in E; [|discriminate]. injection E as <-.
+    cbn [no_dots forallb fst]. rewrite H1. exact (IH r' H2 eq_refl).
+Qed.
+
 Section HeapSteps.
 Variable p : program.
 Variable mdl : model.
@@ -171,12 +222,13 @@ Lemma mstep_getfield : forall s top rest fr nx l r c fs v,
   fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Getfield fr, nx) ->
   f_stack (cf_frame top) = VRef l :: r ->
   ms_heap s l = Some (OObj c fs) ->
-  assoc (fr_name fr) fs = Some v ->
+  obj_get p fr fs = Some v ->
   (stack_slots (v :: r) <=? c_max_stack (cf_code top))%Z = true ->
   mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (v :: r) (f_locals (cf_frame top))) :: rest)).
 Proof.
   intros s top rest fr nx l r c fs v Hfr Hf Hst Hh Ha Hb.
-  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+  unfold obj_get in Ha. destruct (field_slot p fr fs) as [key| |] eqn:Hk; try discriminate Ha.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
 
 Lemma mstep_putfield : forall s top rest fr nx v l r c fs t fs',
@@ -186,7 +238,7 @@ Lemma mstep_putfield : forall s top rest fr nx v l r c fs t fs',
   field_type (fr_desc fr) = Some t ->
   value_fits t v = true ->
   ms_heap s l = Some (OObj c fs) ->
-  set_assoc (fr_name fr) (narrow_store t v) fs = Some fs' ->
+  obj_set p fr (narrow_store t v) fs = Some fs' ->
   (stack_slots r <=? c_max_stack (cf_code top))%Z = true ->
   mstep_of p mdl s =
     MNext (with_frames {| ms_heap := upd (ms_heap s) l (OObj c fs'); ms_next := ms_next s;
@@ -195,9 +247,10 @@ Lemma mstep_putfield : forall s top rest fr nx v l r c fs t fs',
              (set_frame top (mkframe nx r (f_locals (cf_frame top))) :: rest)).
 Proof.
   intros s top rest fr nx v l r c fs t fs' Hfr Hf Hst Ht Hv Hh Ha Hb.
+  unfold obj_set in Ha. destruct (field_slot p fr fs) as [key| |] eqn:Hk; try discriminate Ha.
   unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Ht.
   destruct v; cbn [value_fits] in Hv; try discriminate Hv; cbn [negb];
-  rewrite ?Hv; cbn [negb]; rewrite Hh, Ha; cbv beta iota zeta; cbn [f_stack f_pc f_locals]; rewrite Hb; reflexivity.
+  rewrite ?Hv; cbn [negb]; rewrite Hh, Hk, Ha; cbv beta iota zeta; cbn [f_stack f_pc f_locals]; rewrite Hb; reflexivity.
 Qed.
 
 Lemma mstep_getstatic : forall s top rest fr nx v,
@@ -211,7 +264,9 @@ Lemma mstep_getstatic : forall s top rest fr nx v,
                          (mkframe nx (v :: f_stack (cf_frame top)) (f_locals (cf_frame top))) :: rest)).
 Proof.
   intros s top rest fr nx v Hfr Hf He Hi Ha Hb.
-  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite He, Hi, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+  assert (Ht : static_target p s fr = STKey (static_key (fr_class fr) (fr_name fr)))
+    by (unfold static_target; rewrite He, Hi, Ha; reflexivity).
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Ht, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
 
 Lemma mstep_aaload : forall s top rest nx i l r e es v,
@@ -249,7 +304,8 @@ Lemma mstep_aastore_ref : forall s top rest nx vl i l r e es o cname,
 Proof.
   intros s top rest nx vl i l r e es o cname Hfr Hf Hst Hh Hk Hr Ho Hc Ha Hb.
   unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Hk. cbn [negb]. rewrite Hr, Ho.
-  rewrite Hc, Ha. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
+  rewrite Hc. assert (Ho' : obj_assignable p o cname = Some true) by (unfold obj_assignable; rewrite Ha; reflexivity).
+  rewrite Ho'. cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite Hb. reflexivity.
 Qed.
 
 Lemma mstep_new : forall s top rest cn nx fs,
@@ -290,7 +346,7 @@ Lemma do_invoke_obj_enter : forall s top rest k mr l more r nx cls fs cn m,
 Proof.
   intros s top rest k mr l more r nx cls fs cn m Hk Hh Hr Hn.
   assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest k mr l more (ms_heap s l) r nx)
     by (destruct Hk as [-> | ->]; reflexivity).
   rewrite E, Hh. unfold invoke_obj. destruct Hk as [-> | ->]; rewrite Hr, Hn; reflexivity.
@@ -306,7 +362,7 @@ Lemma do_invoke_special_enter : forall s top rest mr l more r nx o cn m,
 Proof.
   intros s top rest mr l more r nx o cn m Hh Ho Hr Hn.
   assert (E : do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest InvSpecial mr l more (ms_heap s l) r nx) by reflexivity.
   rewrite E, Hh. unfold invoke_obj. destruct o; try discriminate Ho; rewrite Hr, Hn; reflexivity.
 Qed.
@@ -393,7 +449,7 @@ Lemma do_invoke_unloaded_model : forall s top rest k mr l more r nx cls fs v s',
 Proof.
   intros s top rest k mr l more r nx cls fs v s' Hk Hh Hr Hu Hm st' Hb.
   assert (E : do_invoke 8 p mdl s top rest k mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest k mr l more (ms_heap s l) r nx)
     by (destruct Hk as [-> | ->]; reflexivity).
   rewrite E, Hh. unfold invoke_obj.
@@ -438,7 +494,7 @@ Lemma do_invoke_special_model : forall s top rest mr l more r nx o v s',
 Proof.
   intros s top rest mr l more r nx o v s' Hh Ho Hr Hu Hm st' Hb.
   assert (E : do_invoke 8 p mdl s top rest InvSpecial mr (VRef l :: more) r nx =
-              invoke_obj (fun k' impl args' => do_invoke 7 p mdl s top rest k' impl args' r nx)
+              invoke_obj (fun s' r' k' impl args' => do_invoke 7 p mdl s' top rest k' impl args' r' nx)
                          p mdl s top rest InvSpecial mr l more (ms_heap s l) r nx) by reflexivity.
   rewrite E, Hh. unfold invoke_obj. destruct o; try discriminate Ho;
   rewrite Hr, Hu, Hm; unfold invoke_run_model; rewrite Hm; unfold invoke_frame_go; subst st'; rewrite Hb; reflexivity.
@@ -547,7 +603,8 @@ Lemma mstep_checkcast_ref : forall s top rest nx cn l r o,
   mstep_of p mdl s = MNext (with_frames s (set_frame top (mkframe nx (VRef l :: r) (f_locals (cf_frame top))) :: rest)).
 Proof.
   intros s top rest nx cn l r o Hfr Hf Hst Hh Ha Hb.
-  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh, Ha.
+  unfold mstep_of. rewrite Hfr, Hf. cbn [is_local_instr]. rewrite Hst, Hh.
+  unfold obj_assignable. rewrite Ha.
   cbv beta iota zeta; cbn [f_stack f_pc f_locals]. rewrite <- Hst. rewrite Hst at 1. rewrite Hb. reflexivity.
 Qed.
 Lemma mstep_newarray : forall s top rest t e nx n r,

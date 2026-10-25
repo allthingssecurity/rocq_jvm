@@ -6,7 +6,7 @@ import java.util.*;
 
 /** HotSpot side of the differential test.
  *  java DiffRunner <classdir> <binary class name> <method> <descriptor> <inputs>
- *  Prints "V <n>" | "V void" | "E <internal class name of the thrown exception>" per input line. */
+ *  Prints "V <n>" | "V void" | "S <hex units>" | "E <internal class name of the thrown exception> m:<hex units of getMessage()>|m:null" per input line. */
 public class DiffRunner {
     static String desc(Class<?> c) {
         if (c == int.class) return "I"; if (c == long.class) return "J"; if (c == boolean.class) return "Z";
@@ -77,7 +77,15 @@ public class DiffRunner {
                     else if (o instanceof Character c) res = "V " + (int) c;
                     else res = "V " + ((Number) o).longValue();
                 } catch (InvocationTargetException e) {
-                    res = "E " + e.getCause().getClass().getName().replace('.', '/');
+                    // the exception's class and its getMessage() (UTF-16 units in hex, or null); the
+                    // comparison ignores the message when the model makes no claim about it
+                    Throwable th = e.getCause();
+                    String msg;
+                    try { msg = th.getMessage(); } catch (Throwable u) { msg = null; }
+                    StringBuilder sb = new StringBuilder("E ").append(th.getClass().getName().replace('.', '/')).append(" m:");
+                    if (msg == null) sb.append("null");
+                    else for (int j = 0; j < msg.length(); j++) sb.append(String.format("%04x", (int) msg.charAt(j)));
+                    res = sb.toString();
                 }
                 out.println(res);
             }

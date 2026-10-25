@@ -1,0 +1,11 @@
+classes/corpus9 org.rocqjvm.corpus9.Msg div (II)I
+classes/corpus9 org.rocqjvm.corpus9.Msg ldiv (JJ)J
+classes/corpus9 org.rocqjvm.corpus9.Msg index (II)I
+classes/corpus9 org.rocqjvm.corpus9.Msg negIndex (I)I
+classes/corpus9 org.rocqjvm.corpus9.Msg newArr (I)I
+classes/corpus9 org.rocqjvm.corpus9.Msg newRefArr (I)I
+classes/corpus9 org.rocqjvm.corpus9.Msg multi (II)I
+classes/corpus9 org.rocqjvm.corpus9.Msg store (I)I
+classes/corpus9 org.rocqjvm.corpus9.Msg monitor (I)I
+classes/corpus9 org.rocqjvm.corpus9.Msg init (I)I fresh
+classes/corpus9 org.rocqjvm.corpus9.Msg caught (I)Ljava/lang/String;

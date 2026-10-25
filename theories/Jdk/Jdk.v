@@ -11,7 +11,8 @@
     (toString/equals/hashCode of a loaded class) is [MStuckModel]. *)
 
 From Stdlib Require Import ZArith String Ascii List Bool Lia.
-From JVM.Core Require Import Int Instr Desc Semantics Machine.
+From JVM.Core Require Import Int Instr Desc Semantics JdkTables Machine.
+From JVM.Loader Require Import ClassFile.
 From JVM.Jdk Require Import Strings.
 Import ListNotations.
 Open Scope string_scope.
@@ -396,9 +397,29 @@ Definition char_model (e : jenv) (name desc : string) (args : list value) (s : m
   | _ => MNoModel
   end.
 
-Definition num_model (e : jenv) (cls name desc : string) (args : list value) (s : mstate) : model_result :=
-  let key := cls ++ "." ++ name ++ desc in
+(** Integer/Long bit operations (two's complement on 32/64 bits). *)
+Definition unsigned (w : Z) (a : Z) : Z := Z.modulo a (2 ^ w).
+Fixpoint popcount (fuel : nat) (a : Z) : Z :=
+  match fuel with O => 0 | S f => if (a =? 0)%Z then 0 else Z.modulo a 2 + popcount f (Z.div a 2) end.
+Definition nlz (w : Z) (a : Z) : Z := let u := unsigned w a in if (u =? 0)%Z then w else w - 1 - Z.log2 u.
+Definition ntz (w : Z) (a : Z) : Z :=
+  let u := unsigned w a in if (u =? 0)%Z then w else Z.log2 (Z.land u (- u)).
+Definition highest (w : Z) (a : Z) : Z :=
+  let u := unsigned w a in if (u =? 0)%Z then 0 else (if (w =? 32)%Z then wrap32 else wrap64) (2 ^ Z.log2 u).
+Definition lowest (w : Z) (a : Z) : Z :=
+  let u := unsigned w a in (if (w =? 32)%Z then wrap32 else wrap64) (Z.land u (- u)).
+
+Definition ARITH := "java/lang/ArithmeticException".
+
+(** Math's exact and floor operations (JDK 21 semantics). *)
+Definition exact32 (s : mstate) (z : Z) : model_result :=
+  if ((z <? INT_MIN) || (INT_MAX <? z))%Z then MThrow ARITH else ret_int s z.
+Definition exact64 (s : mstate) (z : Z) : model_result :=
+  if ((z <? LONG_MIN) || (LONG_MAX <? z))%Z then MThrow ARITH else MOk (Some (VLong z)) s.
+
+Definition num_model1 (e : jenv) (key : string) (args : list value) (s : mstate) : model_result :=
   match args with
+
   | [VInt a] =>
     if String.eqb key "java/lang/Integer.toString(I)Ljava/lang/String;" then ret_new s (OStr (z_units a))
     else if String.eqb key "java/lang/Math.abs(I)I" then ret_int s (wrap32 (Z.abs a))
@@ -441,6 +462,68 @@ Definition num_model (e : jenv) (cls name desc : string) (args : list value) (s 
     else MNoModel
   | _ => MNoModel
   end.
+
+
+Definition num_model2 (key : string) (args : list value) (s : mstate) : model_result :=
+  match args with
+  | [VInt a] =>
+    if String.eqb key "java/lang/Integer.bitCount(I)I" then ret_int s (popcount 40 (unsigned 32 a))
+    else if String.eqb key "java/lang/Integer.numberOfLeadingZeros(I)I" then ret_int s (nlz 32 a)
+    else if String.eqb key "java/lang/Integer.numberOfTrailingZeros(I)I" then ret_int s (ntz 32 a)
+    else if String.eqb key "java/lang/Integer.highestOneBit(I)I" then ret_int s (highest 32 a)
+    else if String.eqb key "java/lang/Integer.lowestOneBit(I)I" then ret_int s (lowest 32 a)
+    else if String.eqb key "java/lang/Integer.hashCode(I)I" then ret_int s a
+    else if String.eqb key "java/lang/Math.negateExact(I)I" then exact32 s (- a)
+    else if String.eqb key "java/lang/Math.incrementExact(I)I" then exact32 s (a + 1)
+    else if String.eqb key "java/lang/Math.decrementExact(I)I" then exact32 s (a - 1)
+    else if String.eqb key "java/lang/Math.absExact(I)I" then exact32 s (Z.abs a)
+    else MNoModel
+  | [VLong a] =>
+    if String.eqb key "java/lang/Long.bitCount(J)I" then ret_int s (popcount 80 (unsigned 64 a))
+    else if String.eqb key "java/lang/Long.numberOfLeadingZeros(J)I" then ret_int s (nlz 64 a)
+    else if String.eqb key "java/lang/Long.numberOfTrailingZeros(J)I" then ret_int s (ntz 64 a)
+    else if String.eqb key "java/lang/Long.highestOneBit(J)J" then MOk (Some (VLong (highest 64 a))) s
+    else if String.eqb key "java/lang/Long.lowestOneBit(J)J" then MOk (Some (VLong (lowest 64 a))) s
+    else if String.eqb key "java/lang/Long.hashCode(J)I" then ret_int s (wrap32 (Z.lxor (unsigned 64 a) (Z.shiftr (unsigned 64 a) 32)))
+    else if String.eqb key "java/lang/Long.signum(J)I" then ret_int s (Z.sgn a)
+    else if String.eqb key "java/lang/Math.toIntExact(J)I" then exact32 s a
+    else if String.eqb key "java/lang/Math.negateExact(J)J" then exact64 s (- a)
+    else if String.eqb key "java/lang/Math.incrementExact(J)J" then exact64 s (a + 1)
+    else if String.eqb key "java/lang/Math.decrementExact(J)J" then exact64 s (a - 1)
+    else if String.eqb key "java/lang/Math.absExact(J)J" then exact64 s (Z.abs a)
+    else MNoModel
+  | [VInt a; VInt b] =>
+    if String.eqb key "java/lang/Math.floorMod(II)I" then if (b =? 0)%Z then MThrow ARITH else ret_int s (Z.modulo a b)
+    else if String.eqb key "java/lang/Math.floorDiv(II)I" then if (b =? 0)%Z then MThrow ARITH else ret_int s (wrap32 (Z.div a b))
+    else if String.eqb key "java/lang/Math.addExact(II)I" then exact32 s (a + b)
+    else if String.eqb key "java/lang/Math.subtractExact(II)I" then exact32 s (a - b)
+    else if String.eqb key "java/lang/Math.multiplyExact(II)I" then exact32 s (a * b)
+    else if String.eqb key "java/lang/Integer.sum(II)I" then ret_int s (wrap32 (a + b))
+    else if String.eqb key "java/lang/Integer.rotateLeft(II)I" then
+      let u := unsigned 32 a in let k := Z.modulo b 32 in ret_int s (wrap32 (Z.lor (Z.shiftl u k) (Z.shiftr u (32 - k))))
+    else if String.eqb key "java/lang/Integer.rotateRight(II)I" then
+      let u := unsigned 32 a in let k := Z.modulo b 32 in ret_int s (wrap32 (Z.lor (Z.shiftr u k) (Z.shiftl u (32 - k))))
+    else MNoModel
+  | [VLong a; VLong b] =>
+    if String.eqb key "java/lang/Math.floorMod(JJ)J" then if (b =? 0)%Z then MThrow ARITH else MOk (Some (VLong (Z.modulo a b))) s
+    else if String.eqb key "java/lang/Math.floorDiv(JJ)J" then if (b =? 0)%Z then MThrow ARITH else MOk (Some (VLong (wrap64 (Z.div a b)))) s
+    else if String.eqb key "java/lang/Math.addExact(JJ)J" then exact64 s (a + b)
+    else if String.eqb key "java/lang/Math.subtractExact(JJ)J" then exact64 s (a - b)
+    else if String.eqb key "java/lang/Math.multiplyExact(JJ)J" then exact64 s (a * b)
+    else if String.eqb key "java/lang/Long.sum(JJ)J" then MOk (Some (VLong (wrap64 (a + b)))) s
+    else MNoModel
+  | [VLong a; VInt b] =>
+    if String.eqb key "java/lang/Math.floorMod(JI)I" then if (b =? 0)%Z then MThrow ARITH else ret_int s (Z.modulo a b)
+    else if String.eqb key "java/lang/Math.floorDiv(JI)J" then if (b =? 0)%Z then MThrow ARITH else MOk (Some (VLong (wrap64 (Z.div a b)))) s
+    else if String.eqb key "java/lang/Math.multiplyExact(JI)J" then exact64 s (a * b)
+    else MNoModel
+  | _ => MNoModel
+  end.
+
+Definition num_model (e : jenv) (cls name desc : string) (args : list value) (s : mstate) : model_result :=
+  let key := cls ++ "." ++ name ++ desc in
+  match num_model2 key args s with MNoModel => num_model1 e key args s | r => r end.
+
 
 (** ** java.util.Objects *)
 Definition objects_model (name desc : string) (args : list value) (s : mstate) : model_result :=
@@ -619,8 +702,8 @@ Definition enum_model (name desc : string) (args : list value) (s : mstate) : mo
       if String.eqb name "<init>" && String.eqb desc "(Ljava/lang/String;I)V" then
         match rest with
         | [n; VInt o] =>
-            match set_assoc "name" n fs with
-            | Some fs1 => match set_assoc "ordinal" (VInt o) fs1 with
+            match set_assoc (own_key "java/lang/Enum" "name" fs) n fs with
+            | Some fs1 => match set_assoc (own_key "java/lang/Enum" "ordinal" fs) (VInt o) fs1 with
                           | Some fs2 => MOk None (set_heap s l (OObj c fs2))
                           | None => MStuckModel "enum fields"
                           end
@@ -629,12 +712,249 @@ Definition enum_model (name desc : string) (args : list value) (s : mstate) : mo
         | _ => MStuckModel "Enum.<init>"
         end
       else if String.eqb name "ordinal" && String.eqb desc "()I" then
-        match assoc "ordinal" fs with Some v => MOk (Some v) s | None => MStuckModel "ordinal" end
+        match assoc (own_key "java/lang/Enum" "ordinal" fs) fs with Some v => MOk (Some v) s | None => MStuckModel "ordinal" end
       else if (String.eqb name "name" || String.eqb name "toString") && String.eqb desc "()Ljava/lang/String;" then
-        match assoc "name" fs with Some v => MOk (Some v) s | None => MStuckModel "name" end
+        match assoc (own_key "java/lang/Enum" "name" fs) fs with Some v => MOk (Some v) s | None => MStuckModel "name" end
       else if String.eqb name "equals" && String.eqb desc "(Ljava/lang/Object;)Z" then
         match rest with [v] => ret_bool s (ref_eq (VRef l) v) | _ => MStuckModel "equals" end
       else MNoModel
+    | _ => MNoModel
+    end
+  | _ => MNoModel
+  end.
+
+(** ** java.lang.Class (reflection on class objects; JDK 21 behaviour)
+    A class object is [OCls n] with [n] the internal name ("java/lang/String") or, for an
+    array class, its descriptor ("[I", "[Ljava/lang/String;"). Class objects are interned:
+    one object per class. Primitive classes ([int.class] is [Integer.TYPE]) are not modelled. *)
+Definition cls_obj (s : mstate) (n : string) : Z * mstate := intern s (OCls n).
+
+Definition class_of_type (t : jtype) : string := match t with TRef c => c | _ => type_desc t end.
+
+Definition is_array_name (n : string) : bool := prefix "[" n.
+
+Fixpoint after_last_go (c : Z) (u : list Z) (cur : list Z) : list Z :=
+  match u with
+  | nil => rev cur
+  | x :: r => if (x =? c)%Z then after_last_go c r nil else after_last_go c r (x :: cur)
+  end.
+Definition after_last (c : Z) (u : list Z) : list Z := after_last_go c u nil.
+
+(** A class name given as UTF-16 units, if it is ASCII. *)
+Fixpoint units_string (u : list Z) : option string :=
+  match u with
+  | nil => Some EmptyString
+  | c :: r => if ((0 <=? c) && (c <? 128))%Z
+              then match units_string r with Some t => Some (String (Ascii.ascii_of_nat (Z.to_nat c)) t) | None => None end
+              else None
+  end.
+
+Definition prim_name (n : string) : option (list Z) :=
+  let r := fun w => Some (ascii_units w) in
+  if String.eqb n "I" then r "int" else if String.eqb n "J" then r "long" else if String.eqb n "Z" then r "boolean"
+  else if String.eqb n "B" then r "byte" else if String.eqb n "C" then r "char" else if String.eqb n "S" then r "short"
+  else if String.eqb n "F" then r "float" else if String.eqb n "D" then r "double" else None.
+
+(** getSimpleName: from the InnerClasses attribute for loaded classes (Machine.simple_name);
+    for JDK classes the part after the last '/' and '$' (member classes); arrays add "[]". *)
+Fixpoint simple_name_of (p : program) (fuel : nat) (n : string) : option (list Z) :=
+  match fuel with
+  | O => None
+  | S f =>
+    if is_array_name n then
+      match class_type n with
+      | TArr t => match simple_name_of p f (class_of_type t) with
+                  | Some u => Some (app u [91; 93])%Z
+                  | None => None
+                  end
+      | _ => None
+      end
+    else match prim_name n with Some u => Some u | None =>
+         match find_class p n with
+         | Some cf => simple_name cf
+         | None => match jdk_info n with
+                   | _ =>
+                       (* a JDK class: top-level or member class; an anonymous or local one
+                          (its last '$' part starts with a digit) is not modelled *)
+                       let u := after_last 36 (after_last 46 (class_name_units n)) in
+                       match u with
+                       | c :: _ => if ((48 <=? c) && (c <=? 57))%Z then None else Some u
+                       | nil => None
+                       end
+                   end
+         end end
+  end.
+
+Definition builtin_iface (n : string) : bool := existsb (String.eqb n) builtin_interfaces.
+
+Definition class_iface (p : program) (n : string) : option bool :=
+  if is_array_name n then Some false
+  else match class_info p n with
+       | CIUnknown => if builtin_iface n then Some true
+                      else match builtin_super n with Some _ => Some false | None => None end
+       | ci => Some (ci_iface ci)
+       end.
+
+Definition class_super (p : program) (n : string) : option (option string) :=
+  if is_array_name n then Some (Some "java/lang/Object")
+  else match class_info p n with
+       | CIUnknown => if builtin_iface n then Some None else builtin_super n
+       | ci => if ci_iface ci then Some None else Some (ci_super ci)
+       end.
+
+Definition class_access (p : program) (n : string) : option Z :=
+  match class_info p n with
+  | CILoaded cf => Some (cf_access cf)
+  | CIJdk j => Some (ji_access j)
+  | CIUnknown => None
+  end.
+
+(** A class that exists in the JDK as far as the model knows: a java.lang builtin, a class of
+    the JDK tables, or an array class of such (or of a loaded class, or primitive). *)
+Fixpoint known_class_go (p : program) (fuel : nat) (n : string) : bool :=
+  match fuel with
+  | O => false
+  | S f =>
+    if is_array_name n then
+      match class_type n with
+      | TArr t => match t with
+                  | TRef c => match find_class p c with Some _ => true | None => known_class_go p f c end
+                  | TArr _ => known_class_go p f (class_of_type t)
+                  | _ => true
+                  end
+      | _ => false
+      end
+    else match builtin_super n with
+         | Some _ => true
+         | None => builtin_iface n || match jdk_info n with Some _ => true | None => false end
+         end
+  end.
+Definition known_class (p : program) (n : string) : bool := known_class_go p 8 n.
+
+Definition class_model (p : program) (name desc : string) (args : list value) (s : mstate) : model_result :=
+  if String.eqb name "forName" && String.eqb desc "(Ljava/lang/String;)Ljava/lang/Class;" then
+    (* Class.forName(name): the class must be known; it is initialised, so a class whose
+       initialisation has not started yet is STUCK (the model cannot run <clinit>) *)
+    match args with
+    | [VNull] => MThrow "java/lang/NullPointerException"
+    | [v] => match str_of s v with
+             | Some u => match units_string (map (fun c => if (c =? 46)%Z then 47 else c)%Z u) with
+                         | Some n =>
+                             if erroneous p 64 (ms_statics s) n then MThrow "java/lang/NoClassDefFoundError" else
+                             match find_class p n with
+                             | Some _ =>
+                                 (* a loaded class: initialise it, if that needs no <clinit> code *)
+                                 match start_chain p s true (rev (uninit_chain p 64 (ms_inited s) n)) with
+                                 | Some (s1, nil) => let (r, s') := cls_obj s1 n in MOk (Some (VRef r)) s'
+                                 | Some _ => MStuckModel "Class.forName needs class initialisation (<clinit>)"
+                                 | None => MStuckModel "Class.forName: class initialisation"
+                                 end
+                             | None =>
+                                 if known_class p n then let (r, s') := cls_obj s n in MOk (Some (VRef r)) s'
+                                 else MStuckModel "Class.forName of a class the model does not know"
+                             end
+                         | None => MStuckModel "Class.forName: name"
+                         end
+             | None => MStuckModel "Class.forName: argument"
+             end
+    | _ => MStuckModel "Class.forName"
+    end
+  else
+  match args with
+  | VRef l :: rest =>
+    match ms_heap s l with
+    | Some (OCls n) =>
+      match prim_name n with
+      | Some u =>
+        (* a primitive class (the component class of a primitive array) *)
+        if (String.eqb name "getName" || String.eqb name "getSimpleName" || String.eqb name "getTypeName"
+            || String.eqb name "toString") && String.eqb desc "()Ljava/lang/String;" then ret_lit s u
+        else if String.eqb name "isPrimitive" && String.eqb desc "()Z" then ret_bool s true
+        else if (String.eqb name "isArray" || String.eqb name "isInterface" || String.eqb name "isEnum"
+                 || String.eqb name "desiredAssertionStatus") && String.eqb desc "()Z" then ret_bool s false
+        else if (String.eqb name "getSuperclass" || String.eqb name "getComponentType") && String.eqb desc "()Ljava/lang/Class;" then
+          MOk (Some VNull) s
+        else if String.eqb name "isInstance" && String.eqb desc "(Ljava/lang/Object;)Z" then ret_bool s false
+        else if String.eqb name "isAssignableFrom" && String.eqb desc "(Ljava/lang/Class;)Z" then
+          match rest with [VNull] => MThrow "java/lang/NullPointerException" | [v] => ret_bool s (ref_eq (VRef l) v) | _ => MStuckModel "isAssignableFrom" end
+        else if String.eqb name "equals" && String.eqb desc "(Ljava/lang/Object;)Z" then
+          match rest with [v] => ret_bool s (ref_eq (VRef l) v) | _ => MStuckModel "equals" end
+        else MNoModel
+      | None =>
+      if String.eqb name "getName" && String.eqb desc "()Ljava/lang/String;" then ret_lit s (class_name_units n)
+      else if String.eqb name "getTypeName" && String.eqb desc "()Ljava/lang/String;" && negb (is_array_name n) then
+        ret_lit s (class_name_units n)
+      else if String.eqb name "getSimpleName" && String.eqb desc "()Ljava/lang/String;" then
+        match simple_name_of p 8 n with Some u => ret_lit s u | None => MStuckModel "getSimpleName" end
+      else if String.eqb name "isArray" && String.eqb desc "()Z" then ret_bool s (is_array_name n)
+      else if String.eqb name "isPrimitive" && String.eqb desc "()Z" then ret_bool s false
+      else if String.eqb name "isInterface" && String.eqb desc "()Z" then
+        match class_iface p n with Some b => ret_bool s b | None => MStuckModel "isInterface" end
+      else if String.eqb name "isEnum" && String.eqb desc "()Z" then
+        match class_access p n, class_super p n with
+        | Some a, Some sup => ret_bool s (Z.testbit a 14 && match sup with Some c => String.eqb c "java/lang/Enum" | None => false end)
+        | _, _ => if is_array_name n || builtin_iface n then ret_bool s false
+                  else match builtin_super n with Some _ => ret_bool s false | None => MStuckModel "isEnum" end
+        end
+      else if String.eqb name "getSuperclass" && String.eqb desc "()Ljava/lang/Class;" then
+        match class_super p n with
+        | Some None => MOk (Some VNull) s
+        | Some (Some c) => let (r, s') := cls_obj s c in MOk (Some (VRef r)) s'
+        | None => MStuckModel "getSuperclass"
+        end
+      else if String.eqb name "getComponentType" && String.eqb desc "()Ljava/lang/Class;" then
+        match class_type n with
+        | TArr t => match t with
+                    | _ => let (r, s') := cls_obj s (class_of_type t) in MOk (Some (VRef r)) s'
+                    end
+        | _ => MOk (Some VNull) s
+        end
+      else if String.eqb name "isInstance" && String.eqb desc "(Ljava/lang/Object;)Z" then
+        match rest with
+        | [VNull] => ret_bool s false
+        | [VRef o] => match ms_heap s o with
+                      | Some ob => match obj_assignable p ob n with Some b => ret_bool s b | None => MStuckModel "isInstance" end
+                      | None => MStuckModel "isInstance"
+                      end
+        | _ => MStuckModel "isInstance"
+        end
+      else if String.eqb name "isAssignableFrom" && String.eqb desc "(Ljava/lang/Class;)Z" then
+        match rest with
+        | [VNull] => MThrow "java/lang/NullPointerException"
+        | [VRef o] => match ms_heap s o with
+                      | Some (OCls m) => match assignable p 64 (class_type m) n with
+                                         | Some b => ret_bool s b
+                                         | None => MStuckModel "isAssignableFrom"
+                                         end
+                      | _ => MStuckModel "isAssignableFrom"
+                      end
+        | _ => MStuckModel "isAssignableFrom"
+        end
+      else if String.eqb name "cast" && String.eqb desc "(Ljava/lang/Object;)Ljava/lang/Object;" then
+        match rest with
+        | [VNull] => MOk (Some VNull) s
+        | [VRef o] => match ms_heap s o with
+                      | Some ob => match obj_assignable p ob n with
+                                   | Some true => MOk (Some (VRef o)) s
+                                   | Some false => MThrow "java/lang/ClassCastException"
+                                   | None => MStuckModel "cast"
+                                   end
+                      | None => MStuckModel "cast"
+                      end
+        | _ => MStuckModel "cast"
+        end
+      else if String.eqb name "desiredAssertionStatus" && String.eqb desc "()Z" then
+        (* assertions are disabled (no -ea), as in the differential tests *)
+        ret_bool s false
+      else if String.eqb name "toString" && String.eqb desc "()Ljava/lang/String;" then
+        match class_iface p n with
+        | Some b => ret_new s (OStr (app (ascii_units (if b then "interface " else "class ")) (class_name_units n)))
+        | None => MStuckModel "Class.toString"
+        end
+      else if String.eqb name "equals" && String.eqb desc "(Ljava/lang/Object;)Z" then
+        match rest with [v] => ret_bool s (ref_eq (VRef l) v) | _ => MStuckModel "equals" end
+      else MNoModel
+      end
     | _ => MNoModel
     end
   | _ => MNoModel
@@ -655,6 +975,12 @@ Definition object_model (name desc : string) (args : list value) (s : mstate) : 
                   end
       | _ => MStuckModel "getClass"
       end
+    else if (String.eqb name "notify" || String.eqb name "notifyAll") && String.eqb desc "()V" then
+      (* one thread: no other thread waits; the caller must own the monitor *)
+      match this with
+      | VRef l => if (0 <? lock_count (ms_locks s) l)%Z then MOk None s else MThrow "java/lang/IllegalMonitorStateException"
+      | _ => MStuckModel "notify"
+      end
     else if String.eqb name "clone" && String.eqb desc "()Ljava/lang/Object;" then
       match arr_of s this with
       | Some (_, t, es) => ret_new s (OArr t es)
@@ -665,6 +991,35 @@ Definition object_model (name desc : string) (args : list value) (s : mstate) : 
   end.
 
 
+(** Constructors of the java.lang exceptions keep the message (field "detailMessage", as the
+    VM-created exceptions of Machine.throw_msg); causes and stack traces are not modelled. The
+    (Throwable) constructor takes cause.toString() as message, modelled only for a null cause. *)
+Definition set_detail (fs : list (string * value)) (v : value) : list (string * value) :=
+  ("detailMessage", v) :: filter (fun kv => negb (String.eqb (fst kv) "detailMessage")) fs.
+
+Definition throwable_init (desc : string) (args : list value) (s : mstate) : model_result :=
+  match args with
+  | VRef l :: rest =>
+    match ms_heap s l with
+    | Some (OObj c fs) =>
+      if String.eqb desc "()V" then MOk None (set_heap s l (OObj c (set_detail fs VNull)))
+      else if String.eqb desc "(Ljava/lang/Throwable;)V" then
+        match rest with
+        | [VNull] => MOk None (set_heap s l (OObj c (set_detail fs VNull)))
+        | _ => MStuckModel "Throwable(cause): message is cause.toString()"
+        end
+      else match rest with
+           | m :: _ => match m with
+                       | VNull | VRef _ => MOk None (set_heap s l (OObj c (set_detail fs m)))
+                       | _ => MStuckModel "Throwable.<init>"
+                       end
+           | nil => MStuckModel "Throwable.<init>"
+           end
+    | _ => MOk None s
+    end
+  | _ => MOk None s
+  end.
+
 (** ** The JDK model *)
 Definition jdk_model (p : program) (e : jenv) : model :=
   fun cls name desc args s =>
@@ -672,7 +1027,41 @@ Definition jdk_model (p : program) (e : jenv) : model :=
     if String.eqb name "<init>" && is_builtin_throwable cls
        && (String.eqb desc "()V" || String.eqb desc "(Ljava/lang/String;)V"
            || String.eqb desc "(Ljava/lang/String;Ljava/lang/Throwable;)V"
-           || String.eqb desc "(Ljava/lang/Throwable;)V") then MOk None s
+           || String.eqb desc "(Ljava/lang/Throwable;)V") then throwable_init desc args s
+    else if String.eqb cls "java/lang/Record" && String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
+    (* Throwable.getMessage / getLocalizedMessage of a VM-created exception
+       (Machine.throw_msg); other exception objects carry no modelled message *)
+    else if is_builtin_throwable cls && String.eqb name "toString" && String.eqb desc "()Ljava/lang/String;" then
+      match args with
+      | [VRef l] => match ms_heap s l with
+                    | Some (OObj c fs) =>
+                        match find_class p c, assoc "detailMessage" fs with
+                        | None, Some VNull => ret_new s (OStr (class_name_units c))
+                        | None, Some v => match str_of s v with
+                                          | Some u => ret_new s (OStr (app (class_name_units c) (app [58; 32] u)))
+                                          | None => MStuckModel "Throwable.toString"
+                                          end
+                        | _, _ => MStuckModel "Throwable.toString"
+                        end
+                    | _ => MStuckModel "Throwable.toString"
+                    end
+      | _ => MStuckModel "Throwable.toString"
+      end
+    else if is_builtin_throwable cls && (String.eqb name "getMessage" || String.eqb name "getLocalizedMessage")
+            && String.eqb desc "()Ljava/lang/String;" then
+      match args with
+      | [VRef l] => match ms_heap s l with
+                    | Some (OObj c fs) =>
+                        (* the message set by a modelled constructor (also of a loaded subclass,
+                           which reaches this model only if it does not override getMessage) *)
+                        match assoc "detailMessage" fs with
+                        | Some v => MOk (Some v) s
+                        | None => MStuckModel "exception message not modelled"
+                        end
+                    | _ => MStuckModel "getMessage"
+                    end
+      | _ => MStuckModel "getMessage"
+      end
     else if String.eqb cls "java/lang/Object" then
       if String.eqb name "<init>" && String.eqb desc "()V" then MOk None s
       else object_model name desc args s
@@ -697,6 +1086,7 @@ Definition jdk_model (p : program) (e : jenv) : model :=
     else if String.eqb cls "java/lang/Enum" then enum_model name desc args s
     else if prefix "[" cls then object_model name desc args s
     else if prefix "org/slf4j/" cls then slf4j_model e cls name desc args s
+    else if String.eqb cls "java/lang/Class" then class_model p name desc args s
     else MNoModel.
 
 (** ** Entry with String arguments (for the harness and for theorem statements):

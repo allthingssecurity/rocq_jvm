@@ -29,10 +29,7 @@ Lemma asg_str : forall u, assignable cp 64 (runtime_type (OStr u)) STR = Some tr
 Definition OBJ := "java/lang/Object"%string.
 Definition KNOWN := static_key CIM "knownTable".
 
-(** The fields of a CaseInsensitiveMap object; [af] are those of AbstractMap. *)
-Definition cim_fields (tA kA vA cA sz u thr : Z) (af : list (string * value)) : list (string * value) :=
-  [("table", VRef tA); ("keys", VRef kA); ("values", VRef vA); ("chainNext", VRef cA);
-   ("size", VInt sz); ("usedSlots", VInt u); ("threshold", VInt thr)] ++ af.
+(** [cim_fields] (the fields of a CaseInsensitiveMap object) is in CimCalls.v. *)
 
 Definition put_frame (m k : Z) (v : value) : cframe :=
   {| cf_class := CIM; cf_method := put_m; cf_code := put_code; cf_rt := Some (TRef OBJ);
@@ -138,7 +135,7 @@ Proof.
   nz. lstep. lstep. lstep.
   eapply call_dd; [ reflexivity | reflexivity | reflexivity | exact He | exact Hi | exact HK | ].
   nz. lstep. lstep. lstep. lstep.
-  eapply (call_fi e); [ reflexivity | reflexivity | reflexivity | exact Hm | reflexivity | reflexivity | reflexivity
+  eapply (call_fi e); [ reflexivity | reflexivity | reflexivity | exact Hm | apply cim_fields_reads | reflexivity | reflexivity | reflexivity
                       | exact HtA | exact HkA | exact HcA | exact Hk | exact Hlen | exact Hpw | exact Hb | exact Hw | ].
   nz. lstep. exact HR.
 Qed.

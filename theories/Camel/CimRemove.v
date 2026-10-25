@@ -69,7 +69,7 @@ Definition rm_ret (vs : list value) (res : option (Z * Z)) : value :=
   match res with None => VNull | Some (_, c) => nth (Z.to_nat c) vs VNull end.
 
 (** The heap after remove found the key in slot [c] (predecessor [pr]); [j] is the slot after [c]. *)
-Definition rm_heap (h : heap) (m tA kA vA cA sz u thr : Z) (af : list (string * value))
+Definition rm_heap (h : heap) (m tA kA vA cA sz u thr : Z) (af : value * value)
     (tbl ks vs cn : list value) (b pr c j : Z) : heap :=
   let h1 := if pr =? -1 then upd h tA (OArr TInt (set_nth_z tbl b (VInt j)))
             else upd h cA (OArr TInt (set_nth_z cn pr (VInt j))) in
@@ -283,7 +283,7 @@ Proof.
   eapply returns_step.
   { eapply mstep_checkcast_ref; [ reflexivity | reflexivity | reflexivity | hp | apply asg_str | reflexivity ]. }
   nz.
-  eapply (call_fi1 e); [ reflexivity | reflexivity | reflexivity | exact Hm | reflexivity | reflexivity | reflexivity
+  eapply (call_fi1 e); [ reflexivity | reflexivity | reflexivity | exact Hm | apply cim_fields_reads | reflexivity | reflexivity | reflexivity
                        | exact HtA | exact HkA | exact HcA | exact Hk | exact Hmax | exact He | exact Hi
                        | exact Hlen | exact Hpw | exact Hb | exact Hw | ].
   nz. lstep. lstep. lstep.
@@ -336,7 +336,7 @@ Proof.
   eapply returns_step.
   { eapply mstep_checkcast_ref; [ reflexivity | reflexivity | reflexivity | hp | apply asg_str | reflexivity ]. }
   nz.
-  eapply (call_fi1 e); [ reflexivity | reflexivity | reflexivity | exact Hm | reflexivity | reflexivity | reflexivity
+  eapply (call_fi1 e); [ reflexivity | reflexivity | reflexivity | exact Hm | apply cim_fields_reads | reflexivity | reflexivity | reflexivity
                        | exact HtA | exact HkA | exact HcA | exact Hk | exact Hmax | exact He | exact Hi
                        | exact Hlen | exact Hpw | exact Hb | exact Hw | ].
   nz.

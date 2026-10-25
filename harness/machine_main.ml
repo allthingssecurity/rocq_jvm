@@ -2,7 +2,8 @@
    machine_main <classdir[:classdir...]> <binary class name> <method> <descriptor> <inputs> <fuel> [unicode-table]
    Loads every .class under <classdir>; each input line is one fresh run.
    Arguments: decimal ints/longs; Strings as "s:<4 hex digits per UTF-16 unit>" or "null".
-   Output: "V <n>" | "V void" | "V null" | "S <hex units>" | "E <class>" | "STUCK <why>" | "FUEL". *)
+   Output: "V <n>" | "V void" | "V null" | "S <hex units>" | "E <class>[ m:<hex units>|m:null]" | "STUCK <why>" | "FUEL".
+   An exception's message is printed only when the machine models it. *)
 open Jvm
 
 let rec pos_of_int n =
@@ -89,7 +90,15 @@ let () =
                        String.concat " " (("O " ^ c) :: arr)
                    | _ -> "V other")
                | _ -> "V other"))
-          | MRExc (e, s) -> "E " ^ exn_class s e
+          | MRExc (e, s) ->
+              (* the message, when the machine models it (field "detailMessage" of a VM-created exception) *)
+              let msg = match s.ms_heap e with
+                | Some (OObj (_, fs)) -> (match List.assoc_opt "detailMessage" fs with
+                    | Some VNull -> " m:null"
+                    | Some v -> (match str_value s v with Some u -> " m:" ^ units_hex u | None -> "")
+                    | None -> "")
+                | _ -> "" in
+              "E " ^ exn_class s e ^ msg
           | MRStuck w -> "STUCK " ^ w
           | MROutOfFuel -> "FUEL" in
         print_endline out; loop ()

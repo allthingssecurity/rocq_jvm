@@ -31,7 +31,8 @@
     [Stuck]), stack overflow, out of memory. *)
 
 From Stdlib Require Import ZArith String Ascii List Bool Lia.
-From JVM.Core Require Import Int Instr Desc Semantics.
+From JVM.Core Require Import Int Instr Desc Semantics JdkTables.
+From JVM.Core Require Float.
 From JVM.Loader Require Import ClassFile.
 Import ListNotations.
 Open Scope string_scope.
@@ -95,7 +96,9 @@ Fixpoint find_class (p : program) (n : string) : option classfile :=
 Definition builtin_interfaces : list string :=
   ["java/io/Serializable"; "java/lang/Comparable"; "java/lang/CharSequence"; "java/lang/Cloneable";
    "java/lang/Appendable"; "java/lang/constant/Constable"; "java/lang/constant/ConstantDesc";
-   "java/lang/Runnable"; "java/lang/AutoCloseable"; "java/lang/Iterable"].
+   "java/lang/Runnable"; "java/lang/AutoCloseable"; "java/lang/Iterable";
+   "java/lang/reflect/GenericDeclaration"; "java/lang/reflect/Type"; "java/lang/reflect/AnnotatedElement";
+   "java/lang/invoke/TypeDescriptor$OfField"; "java/lang/invoke/TypeDescriptor"].
 
 Definition builtin_super (c : string) : option (option string) :=
   let RE := Some (Some "java/lang/RuntimeException") in
@@ -117,6 +120,8 @@ Definition builtin_super (c : string) : option (option string) :=
   else if String.eqb c "java/lang/UnsupportedOperationException" then RE
   else if String.eqb c "java/lang/StringIndexOutOfBoundsException" then Some (Some "java/lang/IndexOutOfBoundsException")
   else if String.eqb c "java/lang/NumberFormatException" then Some (Some "java/lang/IllegalArgumentException")
+  else if String.eqb c "java/lang/IllegalThreadStateException" then Some (Some "java/lang/IllegalArgumentException")
+  else if String.eqb c "java/lang/InterruptedException" then Some (Some "java/lang/Exception")
   else if String.eqb c "java/util/NoSuchElementException" then RE
   else if String.eqb c "java/util/ConcurrentModificationException" then RE
   else if String.eqb c "java/lang/CloneNotSupportedException" then Some (Some "java/lang/Exception")
@@ -127,9 +132,16 @@ Definition builtin_super (c : string) : option (option string) :=
   else if String.eqb c "java/lang/StackOverflowError" then Some (Some "java/lang/VirtualMachineError")
   else if String.eqb c "java/lang/OutOfMemoryError" then Some (Some "java/lang/VirtualMachineError")
   else if String.eqb c "java/lang/AssertionError" then Some (Some "java/lang/Error")
+  else if String.eqb c "java/lang/IncompatibleClassChangeError" then Some (Some "java/lang/LinkageError")
+  else if String.eqb c "java/lang/AbstractMethodError" || String.eqb c "java/lang/NoSuchFieldError"
+          || String.eqb c "java/lang/NoSuchMethodError" || String.eqb c "java/lang/IllegalAccessError"
+       then Some (Some "java/lang/IncompatibleClassChangeError")
+  else if String.eqb c "java/lang/MatchException" then RE
+  else if String.eqb c "java/lang/Record" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/Number" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Short"
-          || String.eqb c "java/lang/Byte" then Some (Some "java/lang/Number")
+          || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Double" || String.eqb c "java/lang/Float"
+       then Some (Some "java/lang/Number")
   else if String.eqb c "java/lang/Boolean" || String.eqb c "java/lang/Character" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/String" then Some (Some "java/lang/Object")
   else if String.eqb c "java/lang/AbstractStringBuilder" then Some (Some "java/lang/Object")
@@ -142,7 +154,10 @@ Definition builtin_super (c : string) : option (option string) :=
 Definition super_of (p : program) (c : string) : option (option string) :=
   match find_class p c with
   | Some cf => Some (cf_super cf)
-  | None => builtin_super c
+  | None => match builtin_super c with
+            | Some x => Some x
+            | None => option_map ji_super (jdk_info c)
+            end
   end.
 
 Definition interfaces_of (p : program) (c : string) : list string :=
@@ -154,12 +169,25 @@ Definition interfaces_of (p : program) (c : string) : list string :=
        "java/lang/constant/Constable"; "java/lang/constant/ConstantDesc"]
     else if String.eqb c "java/lang/AbstractStringBuilder" then ["java/lang/Appendable"; "java/lang/CharSequence"]
     else if String.eqb c "java/lang/StringBuilder" then
-      ["java/io/Serializable"; "java/lang/Comparable"; "java/lang/CharSequence"]
+      ["java/lang/Appendable"; "java/io/Serializable"; "java/lang/Comparable"; "java/lang/CharSequence"]
     else if String.eqb c "java/lang/Enum" then
       ["java/lang/constant/Constable"; "java/lang/Comparable"; "java/io/Serializable"]
     else if String.eqb c "java/lang/Throwable" then ["java/io/Serializable"]
-    else if String.eqb c "java/lang/Class" then ["java/io/Serializable"]
-    else nil
+    else if String.eqb c "java/lang/Class" then
+      ["java/io/Serializable"; "java/lang/reflect/GenericDeclaration"; "java/lang/reflect/Type";
+       "java/lang/reflect/AnnotatedElement"; "java/lang/invoke/TypeDescriptor$OfField"; "java/lang/constant/Constable"]
+    (* JDK 21 declarations of the boxes and Number *)
+    else if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Double"
+            || String.eqb c "java/lang/Float" then
+      ["java/lang/Comparable"; "java/lang/constant/Constable"; "java/lang/constant/ConstantDesc"]
+    else if String.eqb c "java/lang/Short" || String.eqb c "java/lang/Byte" then
+      ["java/lang/Comparable"; "java/lang/constant/Constable"]
+    else if String.eqb c "java/lang/Character" || String.eqb c "java/lang/Boolean" then
+      ["java/io/Serializable"; "java/lang/Comparable"; "java/lang/constant/Constable"]
+    else if String.eqb c "java/lang/Number" then ["java/io/Serializable"]
+    else if String.eqb c "java/lang/reflect/GenericDeclaration" then ["java/lang/reflect/AnnotatedElement"]
+    else if String.eqb c "java/lang/invoke/TypeDescriptor$OfField" then ["java/lang/invoke/TypeDescriptor"]
+    else match jdk_info c with Some j => ji_ifaces j | None => nil end
   end.
 
 (** [subclass p fuel c d]: is class/interface [c] a subtype of class/interface [d]?
@@ -221,12 +249,44 @@ Fixpoint assignable (p : program) (fuel : nat) (src : jtype) (dst : string) : op
     end
   end.
 
+(** The interfaces of a lambda object: the functional interface, then the
+    marker interfaces of [LambdaMetafactory.altMetafactory], separated by ';'
+    (which cannot occur in a class name). *)
+Fixpoint split_semi (s : string) (cur : string) : list string :=
+  match s with
+  | EmptyString => [cur]
+  | String c r => if Ascii.eqb c ";"%char then cur :: split_semi r EmptyString
+                  else split_semi r (cur ++ String c EmptyString)
+  end.
+Definition lam_ifaces (i : string) : list string := split_semi i EmptyString.
+Definition lam_primary (i : string) : string := match lam_ifaces i with x :: _ => x | nil => i end.
+
 Definition runtime_type (o : object) : jtype :=
   match o with
   | OObj c _ => TRef c | OArr e _ => TArr e
   | OStr _ => TRef "java/lang/String" | OSb _ => TRef "java/lang/StringBuilder"
   | OCls _ => TRef "java/lang/Class"
-  | OLam i _ _ _ _ => TRef i
+  | OLam i _ _ _ _ => TRef (lam_primary i)
+  end.
+
+Definition is_box_name (c : string) : bool :=
+  String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Short"
+  || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character" || String.eqb c "java/lang/Boolean".
+
+(** Is the object [o] an instance of the class/array type [dst]? (lambda
+    objects also implement their marker interfaces) *)
+Definition obj_assignable (p : program) (o : object) (dst : string) : option bool :=
+  match assignable p 64 (runtime_type o) dst with
+  | Some true => Some true
+  | r => match o with
+         | OLam i _ _ _ _ =>
+             fold_left (fun acc c => match acc, subclass p 64 c dst with
+                                     | Some true, _ | _, Some true => Some true
+                                     | None, _ | _, None => None
+                                     | Some false, Some false => Some false
+                                     end) (lam_ifaces i) r
+         | _ => r
+         end
   end.
 
 (** ** Defaults and field declarations *)
@@ -242,32 +302,123 @@ Definition field_type (desc : string) : option jtype :=
 
 Definition is_static_member (m : member) : bool := Z.testbit (mb_access m) 3.
 
-(** Instance fields of [c] and its loaded superclasses with default values. *)
-Fixpoint instance_fields (p : program) (fuel : nat) (c : string) : option (list (string * value)) :=
+(** ** Access flags, packages, and a uniform view of loaded and JDK classes *)
+Definition acc_public (a : Z) : bool := Z.testbit a 0.
+Definition acc_private (a : Z) : bool := Z.testbit a 1.
+Definition acc_protected (a : Z) : bool := Z.testbit a 2.
+Definition acc_static (a : Z) : bool := Z.testbit a 3.
+Definition acc_native (a : Z) : bool := Z.testbit a 8.
+Definition acc_interface (a : Z) : bool := Z.testbit a 9.
+Definition acc_abstract (a : Z) : bool := Z.testbit a 10.
+
+Fixpoint last_slash (s : string) (i : nat) (best : option nat) : option nat :=
+  match s with
+  | EmptyString => best
+  | String ch r => last_slash r (S i) (if Ascii.eqb ch "/"%char then Some i else best)
+  end.
+(** The run-time package of a class (one class loader: the package name). *)
+Definition package_of (c : string) : string :=
+  match last_slash c 0 None with Some n => substring 0 n c | None => "" end.
+
+(** What the machine knows about a class: a loaded class file, an entry of the
+    generated JDK table ([JdkTables.v]), or nothing. *)
+Inductive cinfo : Type := CILoaded (cf : classfile) | CIJdk (j : jinfo) | CIUnknown.
+
+Definition class_info (p : program) (c : string) : cinfo :=
+  match find_class p c with
+  | Some cf => CILoaded cf
+  | None => match jdk_info c with Some j => CIJdk j | None => CIUnknown end
+  end.
+
+Definition ci_iface (ci : cinfo) : bool :=
+  match ci with CILoaded cf => acc_interface (cf_access cf) | CIJdk j => acc_interface (ji_access j) | CIUnknown => false end.
+Definition ci_super (ci : cinfo) : option string :=
+  match ci with CILoaded cf => cf_super cf | CIJdk j => ji_super j | CIUnknown => None end.
+Definition ci_ifaces (ci : cinfo) : list string :=
+  match ci with CILoaded cf => cf_interfaces cf | CIJdk j => ji_ifaces j | CIUnknown => nil end.
+
+Fixpoint jfind (name desc : string) (l : list (string * string * Z)) : option Z :=
+  match l with
+  | nil => None
+  | (n, d, a) :: r => if String.eqb n name && String.eqb d desc then Some a else jfind name desc r
+  end.
+
+(** The method [name desc] declared by a class: its access flags and, for a
+    loaded class, the method itself. *)
+Definition ci_method (ci : cinfo) (name desc : string) : option (Z * option method) :=
+  match ci with
+  | CILoaded cf => option_map (fun m => (m_access m, Some m)) (find_method cf name desc)
+  | CIJdk j => option_map (fun a => (a, None)) (jfind name desc (ji_methods j))
+  | CIUnknown => None
+  end.
+
+Fixpoint mb_find (name desc : string) (l : list member) : option Z :=
+  match l with
+  | nil => None
+  | m :: r => if String.eqb (mb_name m) name && String.eqb (mb_desc m) desc then Some (mb_access m)
+              else mb_find name desc r
+  end.
+
+Definition ci_field (ci : cinfo) (name desc : string) : option Z :=
+  match ci with
+  | CILoaded cf => mb_find name desc (cf_fields cf)
+  | CIJdk j => jfind name desc (ji_fields j)
+  | CIUnknown => None
+  end.
+
+(** No two fields of a class share a name (javac never emits that; the field
+    store is keyed by name, so such a class is not supported). *)
+Fixpoint names_distinct (l : list string) : bool :=
+  match l with nil => true | x :: r => negb (existsb (String.eqb x) r) && names_distinct r end.
+Definition fields_ok (cf : classfile) : bool := names_distinct (map mb_name (cf_fields cf)).
+
+(** ** Instance fields.
+    An object stores its fields in one list, most derived class first.  A field
+    is keyed by its plain name, except a field that is shadowed in the object's
+    class by a field of the same name declared in a subclass: that one is keyed
+    "<DeclaringClass>.<name>" (field names cannot contain '.', JVMS 4.2.2). *)
+Fixpoint raw_fields (p : program) (fuel : nat) (c : string) : option (list (string * string * value)) :=
   match fuel with
   | O => None
   | S k =>
     match find_class p c with
     | None =>
-        if String.eqb c "java/lang/Enum" then Some [("name", VNull); ("ordinal", VInt 0)]
+        if String.eqb c "java/lang/Enum" then Some [(c, "name", VNull); (c, "ordinal", VInt 0)]
         else match builtin_super c with Some _ => Some nil | None => None end
     | Some cf =>
+      if negb (fields_ok cf) then None else
       let own := fold_right (fun m acc =>
                    match acc with
                    | None => None
                    | Some l => if is_static_member m then Some l else
                                match field_type (mb_desc m) with
-                               | Some t => Some ((mb_name m, default_of t) :: l)
+                               | Some t => Some ((c, mb_name m, default_of t) :: l)
                                | None => None
                                end
                    end) (Some nil) (cf_fields cf) in
       match own, cf_super cf with
-      | Some l, Some s => option_map (fun l' => app l l') (instance_fields p k s)
+      | Some l, Some s => option_map (fun l' => app l l') (raw_fields p k s)
       | Some l, None => Some l
       | None, _ => None
       end
     end
   end.
+
+Fixpoint key_fields (seen : list string) (l : list (string * string * value)) : list (string * value) :=
+  match l with
+  | nil => nil
+  | (d, x, v) :: r =>
+      ((if existsb (String.eqb x) seen then d ++ "." ++ x else x), v) :: key_fields (x :: seen) r
+  end.
+
+(** Instance fields of [c] and its superclasses with default values. *)
+Definition instance_fields (p : program) (fuel : nat) (c : string) : option (list (string * value)) :=
+  option_map (key_fields nil) (raw_fields p fuel c).
+
+(** The key of the field [x] declared by [d] in an object with fields [fs]. *)
+Definition own_key (d x : string) (fs : list (string * value)) : string :=
+  let q := d ++ "." ++ x in
+  if existsb (fun kv => String.eqb q (fst kv)) fs then q else x.
 
 (** Narrowing of a stored int by the declared type (putfield/putstatic, bastore...). *)
 Definition narrow_store (t : jtype) (v : value) : value :=
@@ -417,7 +568,7 @@ Fixpoint unwind (p : program) (s : mstate) (exn : Z) (t : jtype) (fs : list cfra
           | Some true => unwind p s1 exn t rest
           | Some false =>
               let l := ms_next s1 in
-              let s2 := {| ms_heap := upd (ms_heap s1) l (OObj "java/lang/ExceptionInInitializerError" nil);
+              let s2 := {| ms_heap := upd (ms_heap s1) l (OObj "java/lang/ExceptionInInitializerError" [("detailMessage", VNull)]);
                            ms_next := l + 1; ms_statics := ms_statics s1; ms_inited := ms_inited s1;
                            ms_locks := ms_locks s1; ms_frames := ms_frames s1 |} in
               unwind p s2 l (TRef "java/lang/ExceptionInInitializerError") rest
@@ -437,8 +588,29 @@ Definition throw_obj (p : program) (s : mstate) (exn : Z) : mstep :=
 Definition throw_new (p : program) (s : mstate) (cls : string) : mstep :=
   let (l, s') := alloc s (OObj cls nil) in throw_obj p s' l.
 
+(** A VM-created exception with its message (JVMS leaves messages to the
+    implementation; these are HotSpot 21's, compared by the differential
+    harness): the message is the field "detailMessage" (a String or null), read
+    by the model of Throwable.getMessage. *)
+Definition throw_msg (p : program) (s : mstate) (cls : string) (msg : option (list Z)) : mstep :=
+  match msg with
+  | Some u => let (m, s1) := alloc s (OStr u) in
+              let (l, s2) := alloc s1 (OObj cls [("detailMessage", VRef m)]) in throw_obj p s2 l
+  | None => let (l, s1) := alloc s (OObj cls [("detailMessage", VNull)]) in throw_obj p s1 l
+  end.
+
+Fixpoint ascii_units (s : string) : list Z :=
+  match s with EmptyString => nil | String c r => Z.of_nat (nat_of_ascii c) :: ascii_units r end.
+
+(** Class.getName: the binary name with '.' (arrays: their descriptor with '.'). *)
+Definition dotted (u : list Z) : list Z := map (fun c => if c =? 47 then 46 else c) u.
+Definition class_name_units (c : string) : list Z :=
+  dotted (match utf8_units c with Some u => u | None => ascii_units c end).
+
 Definition NPE := "java/lang/NullPointerException".
 Definition AIOOBE := "java/lang/ArrayIndexOutOfBoundsException".
+Definition aioobe_msg (i : Z) (n : nat) : list Z :=
+  app (ascii_units "Index ") (app (z_units i) (app (ascii_units " out of bounds for length ") (z_units (Z.of_nat n)))).
 
 (** ** Class initialisation (JVMS 5.5, single thread). *)
 (** A class whose <clinit> failed is erroneous: later uses throw NoClassDefFoundError. *)
@@ -452,6 +624,37 @@ Fixpoint erroneous (p : program) (fuel : nat) (statics : list (string * value)) 
                         | None => match cf_super cf with Some sup => erroneous p k statics sup | None => false end
                         end
            end
+  end.
+
+(** NoClassDefFoundError for [c], whose class or a superclass is erroneous
+    (JVMS 5.5 steps 5 and 7): the exception names the first erroneous class
+    on the chain ("Could not initialize class X", HotSpot 21), and the classes
+    below it whose initialisation had not started become erroneous too. *)
+Fixpoint first_err (p : program) (fuel : nat) (statics : list (string * value)) (c : string)
+  : option (string * list string) :=
+  match fuel with
+  | O => None
+  | S k => match find_class p c with
+           | None => None
+           | Some cf => match assoc ("#err:" ++ c) statics with
+                        | Some _ => Some (c, nil)
+                        | None => match cf_super cf with
+                                  | Some sup => option_map (fun '(e, l) => (e, c :: l)) (first_err p k statics sup)
+                                  | None => None
+                                  end
+                        end
+           end
+  end.
+
+Definition ncdfe (p : program) (s : mstate) (c : string) : mstep :=
+  match first_err p 64 (ms_statics s) c with
+  | Some (e, below) =>
+      let s1 := {| ms_heap := ms_heap s; ms_next := ms_next s;
+                   ms_statics := app (map (fun x => ("#err:" ++ x, VInt 1)) below) (ms_statics s);
+                   ms_inited := app below (ms_inited s); ms_locks := ms_locks s; ms_frames := ms_frames s |} in
+      throw_msg p s1 "java/lang/NoClassDefFoundError"
+                (Some (app (ascii_units "Could not initialize class ") (class_name_units e)))
+  | None => throw_new p s "java/lang/NoClassDefFoundError"
   end.
 
 (** The outermost loaded superclass of [c] (or [c] itself) whose
@@ -517,100 +720,568 @@ Fixpoint put_statics (s : mstate) (l : list (string * (value + list Z))) : mstat
                           ms_inited := ms_inited s''; ms_locks := ms_locks s''; ms_frames := ms_frames s'' |}
   end.
 
-(** Start initialising [cf]: mark it, set its static fields, and push its
-    <clinit> (if any) on top of the current frames; the triggering
-    instruction is re-executed when it returns. *)
-Definition start_init (s : mstate) (cf : classfile) : mstep :=
-  match static_inits cf with
-  | None => MStuck "static field initial value not supported yet"
-  | Some sts =>
-    let s0 := put_statics s sts in
-    let s1 := {| ms_heap := ms_heap s0; ms_next := ms_next s0; ms_statics := ms_statics s0;
-                 ms_inited := cf_this cf :: ms_inited s0; ms_locks := ms_locks s0;
-                 ms_frames := ms_frames s0 |} in
-    match find_method cf "<clinit>" "()V" with
-    | None => MNext s1
-    | Some m =>
-      match m_code m with
-      | None => MStuck "<clinit> without code"
-      | Some c =>
-        match ms_frames s with
-        | top :: rest =>
-            MNext (with_frames s1
-              ({| cf_class := cf_this cf; cf_method := m; cf_code := c; cf_rt := None;
-                  cf_frame := mkframe 0 nil (repeat VTop (Z.to_nat (c_max_locals c)));
-                  cf_resume := None; cf_clinit := true |} :: set_resume top None :: rest))
-        | nil => MStuck "no frame"
-        end
-      end
-    end
-  end.
-
-(** ** Method resolution: [c] or its loaded superclasses. *)
-Fixpoint resolve (p : program) (fuel : nat) (c name desc : string) : option (string * method) :=
+(** Initialisation of a class or interface [c] (JVMS 5.5, single thread).
+    Step 6 marks [c] as being initialised and sets its ConstantValue fields;
+    step 7 then initialises the superclass (recursively: its steps 6 and 7
+    happen at once, before any code runs), then the superinterfaces that
+    declare a non-abstract, non-static method, then step 9 runs <clinit>.
+    So all classes of the superclass chain whose initialisation has not
+    started are marked first, and their <clinit> frames are pushed outermost
+    on top.  A frame at pc -1 has not started yet: before its <clinit> runs it
+    initialises its superinterfaces ([clinit_prepare]); an exception passing
+    through it marks its class erroneous (step 7) and is rethrown as is (it is
+    an Error: ExceptionInInitializerError or NoClassDefFoundError). *)
+Fixpoint uninit_chain (p : program) (fuel : nat) (inited : list string) (c : string) : list classfile :=
   match fuel with
-  | O => None
+  | O => nil
   | S k =>
     match find_class p c with
-    | None => None
-    | Some cf =>
-      match find_method cf name desc with
-      | Some m => Some (c, m)
-      | None => match cf_super cf with Some s => resolve p k s name desc | None => None end
-      end
+    | None => nil
+    | Some cf => if existsb (String.eqb c) inited then nil
+                 else cf :: match cf_super cf with Some s => uninit_chain p k inited s | None => nil end
     end
   end.
 
-(** Default methods (JVMS 5.4.3.3 step 3, simplified): if the superclass chain
-    has no method, search the superinterfaces of the chain, depth first, for a
-    method with code.  The "maximally specific" rule is not checked: when two
-    unrelated interfaces both supply a default, the first one found is taken
-    (javac rejects such classes unless the class overrides the method).
-    LIMITATION recorded in STATUS.md. *)
-Fixpoint iface_lookup (p : program) (fuel : nat) (ifs : list string) (name desc : string)
-  : option (string * method) :=
+(** Superinterfaces in the order of JVMS 5.5 step 7: for each direct
+    superinterface, its own superinterfaces first, then itself. *)
+Fixpoint iface_init_order (p : program) (fuel : nat) (ifs : list string) : list string :=
+  match fuel with
+  | O => nil
+  | S k =>
+    match ifs with
+    | nil => nil
+    | i :: r => app (match find_class p i with
+                     | Some cf => app (iface_init_order p k (cf_interfaces cf)) [i]
+                     | None => nil
+                     end) (iface_init_order p k r)
+    end
+  end.
+
+Definition has_instance_body (cf : classfile) : bool :=
+  existsb (fun m => negb (acc_abstract (m_access m)) && negb (acc_static (m_access m))) (cf_methods cf).
+
+(** Loaded superinterfaces that step 7 initialises (JDK interfaces are never
+    initialised by the machine, like JDK classes). *)
+Definition init_ifaces (p : program) (cf : classfile) : list string :=
+  if acc_interface (cf_access cf) then nil else
+  filter (fun i => match find_class p i with Some icf => has_instance_body icf | None => false end)
+         (iface_init_order p 64 (cf_interfaces cf)).
+
+Definition empty_clinit_code : code :=
+  {| c_max_stack := 0; c_max_locals := 0; c_length := 1; c_instrs := [(0, Return None)]; c_handlers := nil |}.
+Definition empty_clinit : method :=
+  {| m_name := "<clinit>"; m_desc := "()V"; m_access := 8; m_code := Some empty_clinit_code |}.
+
+Definition mark_inited (s : mstate) (c : string) : mstate :=
+  {| ms_heap := ms_heap s; ms_next := ms_next s; ms_statics := ms_statics s;
+     ms_inited := c :: ms_inited s; ms_locks := ms_locks s; ms_frames := ms_frames s |}.
+
+Definition clinit_of (cf : classfile) : option (option (method * code)) :=
+  match find_method cf "<clinit>" "()V" with
+  | Some m => match m_code m with Some c => Some (Some (m, c)) | None => None end
+  | None => Some None
+  end.
+
+Definition pending_frame (cf : classfile) (m : method) (c : code) (at_pc : Z) : cframe :=
+  {| cf_class := cf_this cf; cf_method := m; cf_code := c; cf_rt := None;
+     cf_frame := mkframe at_pc nil (repeat VTop (Z.to_nat (c_max_locals c)));
+     cf_resume := None; cf_clinit := true |}.
+
+(** Steps 6 for each class of the chain (outermost first) and the frames to
+    push (outermost first).  A class without <clinit> and without
+    superinterfaces to initialise needs no frame; the outermost frame starts
+    at pc 0 when it has no superinterfaces to initialise. *)
+Fixpoint start_chain (p : program) (s : mstate) (outermost : bool) (cfs : list classfile)
+  : option (mstate * list cframe) :=
+  match cfs with
+  | nil => Some (s, nil)
+  | cf :: r =>
+    match static_inits cf, clinit_of cf, fields_ok cf with
+    | Some sts, Some cl, true =>
+      let s1 := mark_inited (put_statics s sts) (cf_this cf) in
+      let prep := match init_ifaces p cf with nil => false | _ => true end in
+      let fr := match cl with
+                | Some (m, c) => Some (pending_frame cf m c (if outermost && negb prep then 0 else -1))
+                | None => if prep then Some (pending_frame cf empty_clinit empty_clinit_code (-1)) else None
+                end in
+      match start_chain p s1 false r with
+      | Some (s2, frs) => Some (s2, match fr with Some f => f :: frs | None => frs end)
+      | None => None
+      end
+    | _, _, _ => None
+    end
+  end.
+
+Definition init_class (p : program) (s : mstate) (c : string) : mstep :=
+  match ms_frames s with
+  | nil => MStuck "no frame"
+  | top :: rest =>
+    match start_chain p s true (rev (uninit_chain p 64 (ms_inited s) c)) with
+    | Some (s1, frs) => MNext (with_frames s1 (app frs (set_resume top None :: rest)))
+    | None => MStuck "class initialisation: static field initial value, <clinit> without code, or two fields with one name"
+    end
+  end.
+
+(** A pending <clinit> frame (pc -1) of a class: initialise the next
+    superinterface of step 7 that has not been initialised (an erroneous one
+    throws NoClassDefFoundError), else start the <clinit> code at pc 0. *)
+Definition clinit_prepare (p : program) (s : mstate) (top : cframe) (rest : list cframe) : mstep :=
+  match find_class p (cf_class top) with
+  | None => MStuck "pending <clinit> of a class that is not loaded"
+  | Some cf =>
+    let todo := filter (fun i => negb (existsb (String.eqb i) (ms_inited s)) || erroneous p 64 (ms_statics s) i)
+                       (init_ifaces p cf) in
+    match todo with
+    | nil => MNext (with_frames s (set_frame top (mkframe 0 nil (f_locals (cf_frame top))) :: rest))
+    | i :: _ => if erroneous p 64 (ms_statics s) i then ncdfe p s i
+                else init_class p s i
+    end
+  end.
+
+(** ** Hierarchy walks over loaded classes and the JDK table *)
+
+(** [c] and its superclasses; [None] if a class is unknown. *)
+Fixpoint class_chain (p : program) (fuel : nat) (c : string) : option (list string) :=
   match fuel with
   | O => None
   | S k =>
-    match ifs with
-    | nil => None
+    match class_info p c with
+    | CIUnknown => None
+    | ci => match ci_super ci with
+            | Some s => option_map (cons c) (class_chain p k s)
+            | None => Some [c]
+            end
+    end
+  end.
+
+(** All interfaces reachable from [todo] (each once); [None] if one is unknown. *)
+Fixpoint iface_closure (p : program) (fuel : nat) (todo acc : list string) : option (list string) :=
+  match fuel with
+  | O => None
+  | S k =>
+    match todo with
+    | nil => Some (rev acc)
     | i :: r =>
-      match find_class p i with
-      | Some cf =>
-        match find_method cf name desc with
-        | Some m => match m_code m with
-                    | Some _ => Some (i, m)
-                    | None => match iface_lookup p k (cf_interfaces cf) name desc with
-                              | Some x => Some x
-                              | None => iface_lookup p k r name desc
-                              end
-                    end
-        | None => match iface_lookup p k (cf_interfaces cf) name desc with
-                  | Some x => Some x
-                  | None => iface_lookup p k r name desc
-                  end
-        end
-      | None => iface_lookup p k r name desc
+      if existsb (String.eqb i) acc then iface_closure p k r acc else
+      match class_info p i with
+      | CIUnknown => None
+      | ci => iface_closure p k (app (ci_ifaces ci) r) (i :: acc)
       end
     end
   end.
 
-Fixpoint chain_interfaces (p : program) (fuel : nat) (c : string) : list string :=
+(** The superinterfaces (direct and indirect) of a class or interface. *)
+Definition superifaces (p : program) (c : string) : option (list string) :=
+  match class_chain p 64 c with
+  | Some ch => iface_closure p 1024 (flat_map (fun x => ci_ifaces (class_info p x)) ch) nil
+  | None => None
+  end.
+
+(** [j] is a proper subinterface of [i]. *)
+Definition sub_iface (p : program) (j i : string) : bool :=
+  match iface_closure p 1024 (ci_ifaces (class_info p j)) nil with
+  | Some l => existsb (String.eqb i) l
+  | None => false
+  end.
+
+Definition mdecl : Type := (string * Z * option method)%type.   (** declaring class, access, method *)
+Definition md_class (d : mdecl) : string := match d with (c, _, _) => c end.
+Definition md_acc (d : mdecl) : Z := match d with (_, a, _) => a end.
+
+(** The maximally-specific superinterface methods of [c] for [name desc]
+    (JVMS 5.4.3.3); [None] if the superinterfaces are not all known. *)
+Definition max_specific (p : program) (c name desc : string) : option (list mdecl) :=
+  match superifaces p c with
+  | None => None
+  | Some ifs =>
+    let cands := flat_map (fun i => match ci_method (class_info p i) name desc with
+                                    | Some (a, om) => if acc_private a || acc_static a then nil else [(i, a, om)]
+                                    | None => nil
+                                    end) ifs in
+    Some (filter (fun d => negb (existsb (fun d' => negb (String.eqb (md_class d') (md_class d))
+                                                    && sub_iface p (md_class d') (md_class d)) cands)) cands)
+  end.
+
+Definition non_abstract (l : list mdecl) : list mdecl := filter (fun d => negb (acc_abstract (md_acc d))) l.
+
+(** Lookup of a declaration along the superclass chain. *)
+Inductive clook : Type := CLFound (d : mdecl) | CLEnd | CLUnknown.
+
+(** Method resolution step 2 (JVMS 5.4.3.3): the first declaration of
+    [name desc] in [c] or a superclass (any access; [inst] = instance methods only). *)
+Fixpoint chain_lookup (p : program) (fuel : nat) (c name desc : string) (inst : bool) : clook :=
+  match fuel with
+  | O => CLUnknown
+  | S k =>
+    match class_info p c with
+    | CIUnknown => CLUnknown
+    | ci =>
+      let cont := match ci_super ci with Some s => chain_lookup p k s name desc inst | None => CLEnd end in
+      match ci_method ci name desc with
+      | Some (a, om) => if inst && acc_static a then cont else CLFound (c, a, om)
+      | None => cont
+      end
+    end
+  end.
+
+(** Declarations of [name desc] in the loaded part of the hierarchy of [c]
+    (superclasses and superinterfaces). *)
+Fixpoint loaded_chain (p : program) (fuel : nat) (c : string) : list classfile :=
   match fuel with
   | O => nil
   | S k => match find_class p c with
-           | Some cf => app (cf_interfaces cf)
-                            (match cf_super cf with Some s => chain_interfaces p k s | None => nil end)
+           | Some cf => cf :: match cf_super cf with Some s => loaded_chain p k s | None => nil end
            | None => nil
            end
   end.
 
+Fixpoint loaded_ifaces (p : program) (fuel : nat) (todo acc : list string) : list string :=
+  match fuel with
+  | O => rev acc
+  | S k =>
+    match todo with
+    | nil => rev acc
+    | i :: r => if existsb (String.eqb i) acc then loaded_ifaces p k r acc else
+                match find_class p i with
+                | Some cf => loaded_ifaces p k (app (cf_interfaces cf) r) (i :: acc)
+                | None => loaded_ifaces p k r acc
+                end
+    end
+  end.
+
+Definition hier_decls (p : program) (c name desc : string) : list mdecl :=
+  let ch := loaded_chain p 64 c in
+  let ifs := loaded_ifaces p 1024 (flat_map cf_interfaces ch) nil in
+  flat_map (fun x => match find_class p x with
+                     | Some cf => match find_method cf name desc with
+                                  | Some m => [(x, m_access m, Some m)]
+                                  | None => nil
+                                  end
+                     | None => nil
+                     end) (app (map cf_this ch) ifs).
+
+(** Package-private declarations of one name/descriptor in several packages
+    make overriding depend on the resolved method (JVMS 5.4.5). *)
+Definition package_ok (ds : list mdecl) : bool :=
+  match filter (fun d => negb (acc_public (md_acc d) || acc_protected (md_acc d) || acc_private (md_acc d))) ds with
+  | nil => true
+  | d0 :: _ => forallb (fun d => String.eqb (package_of (md_class d)) (package_of (md_class d0))) ds
+  end.
+
+(** ** [resolve_full p c name desc]: the method a call of [name desc] on an
+    object of class [c] (invokevirtual / invokeinterface, JVMS 5.4.6), or a
+    call through [c] by invokestatic / invokespecial, enters, when that method
+    does not depend on more than [c], [name] and [desc]:
+    - constructors: the one declared by [c];
+    - if the hierarchy declares a private [name desc] (private methods are
+      selected only as the resolved method, JVMS 5.4.6 step 1), only when it
+      is the only declaration of [name desc] in the hierarchy;
+    - otherwise the first declaration on the superclass chain (step 2), if it
+      is not abstract and no package-private declaration in another package
+      can change what overrides what (JVMS 5.4.5);
+    - otherwise the only non-abstract maximally-specific superinterface
+      method (step 3).
+    [None] in every other case (JDK classes, abstract methods, conflicts): the
+    caller then asks the JDK model, and else performs full resolution and
+    selection ([select_virtual], [select_special], [resolve_method]).
+    Assumption (javac output): the declaration found in the receiver's class
+    hierarchy is an instance method when the instruction is invokevirtual or
+    invokeinterface (resolution of a static method there would throw
+    IncompatibleClassChangeError; javac never emits it). *)
 Definition resolve_full (p : program) (c name desc : string) : option (string * method) :=
-  match resolve p 64 c name desc with
-  | Some x => Some x
-  | None => iface_lookup p 256 (match find_class p c with
-                                | Some cf => if Z.testbit (cf_access cf) 9 then [c] else chain_interfaces p 64 c
-                                | None => nil end) name desc
+  match find_class p c with
+  | None => None
+  | Some cf =>
+    if String.eqb name "<init>" then option_map (fun m => (c, m)) (find_method cf name desc) else
+    let ds := hier_decls p c name desc in
+    if existsb (fun d => acc_private (md_acc d)) ds then
+      match ds with
+      | [(d, _, Some m)] => Some (d, m)
+      | _ => None
+      end
+    else
+      match chain_lookup p 64 c name desc false with
+      | CLFound (d, a, Some m) => if acc_abstract a || negb (package_ok ds) then None else Some (d, m)
+      | CLFound (_, _, None) | CLUnknown => None
+      | CLEnd =>
+          match max_specific p c name desc with
+          | Some ms => match non_abstract ms with
+                       | [(d, _, Some m)] => Some (d, m)
+                       | _ => None
+                       end
+          | None => None
+          end
+      end
+  end.
+
+(** ** Full method resolution (JVMS 5.4.3.3 for Methodref, 5.4.3.4 for InterfaceMethodref). *)
+Inductive rres : Type := RFound (d : mdecl) | RThrow (exc : string) | RUnknown.
+
+Definition ICCE := "java/lang/IncompatibleClassChangeError".
+Definition AME := "java/lang/AbstractMethodError".
+Definition NSME := "java/lang/NoSuchMethodError".
+Definition NSFE := "java/lang/NoSuchFieldError".
+Definition IAE := "java/lang/IllegalAccessError".
+
+Definition resolve_method (p : program) (imr : bool) (c name desc : string) : rres :=
+  match class_info p c with
+  | CIUnknown => RUnknown
+  | ci =>
+    if negb (Bool.eqb (ci_iface ci) imr) then RThrow ICCE else
+    let step2 :=
+      if imr then
+        match ci_method ci name desc with
+        | Some (a, om) => CLFound (c, a, om)
+        | None => match ci_method (class_info p "java/lang/Object") name desc with
+                  | Some (a, om) => if acc_public a && negb (acc_static a)
+                                    then CLFound ("java/lang/Object", a, om) else CLEnd
+                  | None => CLEnd
+                  end
+        end
+      else chain_lookup p 64 c name desc false in
+    match step2 with
+    | CLFound d => RFound d
+    | CLUnknown => RUnknown
+    | CLEnd =>
+        match max_specific p c name desc with
+        | None => RUnknown
+        | Some ms => match non_abstract ms with
+                     | [d] => RFound d
+                     | _ => match ms with d :: _ => RFound d | nil => RThrow NSME end
+                     end
+        end
+    end
+  end.
+
+(** [mC] declared in [dC] can override [mA] declared in [dA] (JVMS 5.4.5),
+    [dC] a subclass of [dA]; [between] = the classes strictly between them. *)
+Fixpoint can_override_go (p : program) (fuel : nat) (name desc : string) (between : list string)
+         (dC : string) (aC : Z) (dA : string) (aA : Z) : bool :=
+  negb (acc_private aC) &&
+  (acc_public aA || acc_protected aA || String.eqb (package_of dC) (package_of dA) ||
+   match fuel with
+   | O => false
+   | S k =>
+     (fix tr (bs : list string) (before : list string) : bool :=
+        match bs with
+        | nil => false
+        | b :: r =>
+          match ci_method (class_info p b) name desc with
+          | Some (aB, _) => (negb (acc_static aB) && can_override_go p k name desc (rev before) dC aC b aB
+                             && can_override_go p k name desc r b aB dA aA) || tr r (b :: before)
+          | None => tr r (b :: before)
+          end
+        end) between nil
+   end).
+
+Fixpoint take_until (x : string) (l : list string) : list string :=
+  match l with nil => nil | y :: r => if String.eqb x y then nil else y :: take_until x r end.
+
+(** Selection (JVMS 5.4.6) of an instance method that can override the resolved method [mR] from the superclass chain [cs]. *)
+Fixpoint select_chain (p : program) (cs : list string) (name desc : string) (dR : string) (aR : Z) : clook :=
+  match cs with
+  | nil => CLEnd
+  | k :: r =>
+    match class_info p k with
+    | CIUnknown => CLUnknown
+    | ci =>
+      match ci_method ci name desc with
+      | Some (a, om) =>
+          if negb (acc_static a) && can_override_go p 8 name desc (take_until dR r) k a dR aR
+          then CLFound (k, a, om) else select_chain p r name desc dR aR
+      | None => select_chain p r name desc dR aR
+      end
+    end
+  end.
+
+(** Outcome of a full selection. *)
+Inductive sel : Type := SelEnter (d : string) (m : method) | SelModel (d : string) | SelThrow (exc : string)
+                      | SelStuck (why : string) | SelUnknown.
+
+Definition sel_of (d : mdecl) : sel :=
+  match d with (c, _, Some m) => SelEnter c m | (c, _, None) => SelModel c end.
+
+(** invokevirtual / invokeinterface: resolution of [mr], then selection on the receiver's class [rc]. *)
+Definition select_virtual (p : program) (itf : bool) (mr : methodref) (rc : string) : sel :=
+  match resolve_method p (mr_interface mr) (mr_class mr) (mr_name mr) (mr_desc mr) with
+  | RUnknown => SelUnknown
+  | RThrow e => SelThrow e
+  | RFound (dR, aR, omR) =>
+    if acc_static aR then SelThrow ICCE else
+    match (if itf then subclass p 64 rc (mr_class mr) else Some true) with
+    | None => SelUnknown
+    | Some false => SelThrow ICCE
+    | Some true =>
+      let finish (d : mdecl) :=
+        if acc_abstract (md_acc d) then SelThrow AME
+        else if itf && negb (acc_public (md_acc d) || acc_private (md_acc d)) then SelThrow IAE
+        else sel_of d in
+      if acc_private aR then sel_of (dR, aR, omR) else
+      match class_chain p 64 rc with
+      | None => SelUnknown
+      | Some cs =>
+        match select_chain p cs (mr_name mr) (mr_desc mr) dR aR with
+        | CLFound d => finish d
+        | CLUnknown => SelUnknown
+        | CLEnd =>
+            match max_specific p rc (mr_name mr) (mr_desc mr) with
+            | None => SelUnknown
+            | Some ms => match non_abstract ms with
+                         | [d] => finish d
+                         | nil => SelThrow AME
+                         | _ => if itf
+                                then SelStuck "invokeinterface with several maximally-specific default methods: JVMS 6.5 says IncompatibleClassChangeError, HotSpot 21 throws AbstractMethodError"
+                                else SelThrow ICCE
+                         end
+            end
+        end
+      end
+    end
+  end.
+
+(** invokespecial (JVMS 6.5): resolution, then the lookup from the direct
+    superclass of the current class [cur] (super calls) or from the referenced class. *)
+Definition select_special (p : program) (cur : string) (mr : methodref) : sel :=
+  let name := mr_name mr in
+  let desc := mr_desc mr in
+  match resolve_method p (mr_interface mr) (mr_class mr) name desc with
+  | RUnknown => SelUnknown
+  | RThrow e => SelThrow e
+  | RFound (dR, aR, _) =>
+    if String.eqb name "<init>" && negb (String.eqb dR (mr_class mr)) then SelThrow NSME else
+    if acc_static aR then SelThrow ICCE else
+    let cur_super := match class_info p cur with CILoaded cf => cf_super cf | _ => None end in
+    let is_super := match class_chain p 64 cur with
+                    | Some (_ :: sups) => existsb (String.eqb (mr_class mr)) sups
+                    | _ => false
+                    end in
+    let c := match cur_super with
+             | Some sc => if negb (String.eqb name "<init>") && negb (mr_interface mr) && is_super then sc
+                          else mr_class mr
+             | None => mr_class mr
+             end in
+    let ci := class_info p c in
+    let found :=
+      if ci_iface ci then
+        match ci_method ci name desc with
+        | Some (a, om) => if acc_static a then CLEnd else CLFound (c, a, om)
+        | None => match ci_method (class_info p "java/lang/Object") name desc with
+                  | Some (a, om) => if acc_public a && negb (acc_static a)
+                                    then CLFound ("java/lang/Object", a, om) else CLEnd
+                  | None => CLEnd
+                  end
+        end
+      else chain_lookup p 64 c name desc true in
+    match found with
+    | CLFound d => if acc_abstract (md_acc d) then SelThrow AME else sel_of d
+    | CLUnknown => SelUnknown
+    | CLEnd =>
+        match max_specific p c name desc with
+        | None => SelUnknown
+        | Some ms => match non_abstract ms with
+                     | [d] => sel_of d
+                     | nil => SelThrow AME
+                     | _ => SelThrow ICCE
+                     end
+        end
+    end
+  end.
+
+(** ** Field resolution (JVMS 5.4.3.2): [c], then its superinterfaces, then its superclass. *)
+Inductive fres : Type := FFound (d : string) (acc : Z) | FNotFound | FUnknown.
+
+Fixpoint field_lookup (p : program) (fuel : nat) (c name desc : string) : fres :=
+  match fuel with
+  | O => FUnknown
+  | S k =>
+    match class_info p c with
+    | CIUnknown => FUnknown
+    | ci =>
+      match ci_field ci name desc with
+      | Some a => FFound c a
+      | None =>
+        let fix ifs (l : list string) : fres :=
+          match l with
+          | nil => FNotFound
+          | i :: r => match field_lookup p k i name desc with
+                      | FNotFound => ifs r
+                      | x => x
+                      end
+          end in
+        match ifs (ci_ifaces ci) with
+        | FNotFound => match ci_super ci with
+                       | Some s => field_lookup p k s name desc
+                       | None => FNotFound
+                       end
+        | x => x
+        end
+      end
+    end
+  end.
+
+Definition resolve_field (p : program) (fr : fieldref) : fres :=
+  field_lookup p 64 (fr_class fr) (fr_name fr) (fr_desc fr).
+
+(** The key of the instance field [fr] in an object with fields [fs]: its plain
+    name unless the object stores a shadowed field of that name, in which case
+    the field is resolved (JVMS 5.4.3.2) and keyed by its declaring class
+    (see [instance_fields]).  Assumption (javac output): a field whose name is
+    stored once in the object is the field the reference resolves to. *)
+Inductive fslot : Type := FSKey (k : string) | FSThrow (exc : string) | FSStuck (why : string).
+
+Definition qual_of (x k : string) : bool :=
+  let n := String.length x in
+  let m := String.length k in
+  (S n <? m)%nat && String.eqb (substring (m - S n) (S n) k) (String "."%char x).
+
+Definition field_slot (p : program) (fr : fieldref) (fs : list (string * value)) : fslot :=
+  if existsb (fun kv => qual_of (fr_name fr) (fst kv)) fs then
+    match resolve_field p fr with
+    | FFound d a => if acc_static a then FSThrow ICCE else FSKey (own_key d (fr_name fr) fs)
+    | FNotFound => FSThrow NSFE
+    | FUnknown => FSStuck "field resolution reaches a class the machine does not know"
+    end
+  else FSKey (fr_name fr).
+
+Definition obj_get (p : program) (fr : fieldref) (fs : list (string * value)) : option value :=
+  match field_slot p fr fs with FSKey k => assoc k fs | _ => None end.
+Definition obj_set (p : program) (fr : fieldref) (v : value) (fs : list (string * value))
+  : option (list (string * value)) :=
+  match field_slot p fr fs with FSKey k => set_assoc k v fs | _ => None end.
+
+(** Static field access: the key in [ms_statics] of the field, or what to do first. *)
+Inductive starget : Type := STKey (k : string) | STInit (d : string) | STThrow (exc : string) | STNcdfe (d : string)
+                          | STJdk (d : string) | STStuck (why : string).
+
+(** Fast path: the referenced class declares the field (its key exists exactly
+    when its initialisation has started and it declares a static field of that
+    name) and is initialised and not erroneous.  Otherwise the field is
+    resolved and its declaring class is initialised (JVMS 6.5 getstatic,
+    5.5): a static field inherited from a superclass or superinterface does
+    not initialise the referenced class. *)
+Definition static_target (p : program) (s : mstate) (fr : fieldref) : starget :=
+  let c := fr_class fr in
+  let k0 := static_key c (fr_name fr) in
+  if negb (erroneous p 64 (ms_statics s) c)
+     && match init_needed p 64 (ms_inited s) c with None => true | Some _ => false end
+     && match assoc k0 (ms_statics s) with Some _ => true | None => false end
+  then STKey k0 else
+  match resolve_field p fr with
+  | FFound d a =>
+      if negb (acc_static a) then STThrow ICCE
+      else if erroneous p 64 (ms_statics s) d then STNcdfe d
+      else match init_needed p 64 (ms_inited s) d with
+           | Some _ => STInit d
+           | None => match find_class p d with
+                     | Some _ => STKey (static_key d (fr_name fr))
+                     | None => STJdk d
+                     end
+           end
+  | FNotFound => STThrow NSFE
+  | FUnknown => match find_class p c with
+                | None => STJdk c
+                | Some _ => STStuck "static field resolution reaches a class the machine does not know"
+                end
   end.
 
 Definition ACC_NATIVE : Z := 256.
@@ -803,7 +1474,7 @@ Definition invoke_kind_of_ref (kind : Z) : option invoke_kind :=
   else if kind =? 5 then Some InvVirtual  (* REF_invokeVirtual *)
   else if kind =? 9 then Some InvInterface
   else if kind =? 7 then Some InvSpecial  (* REF_invokeSpecial: private instance methods *)
-  else None.                              (* REF_newInvokeSpecial (Foo::new): not yet *)
+  else None.                              (* REF_newInvokeSpecial (8): [invoke_obj] *)
 
 Definition invoke_frame_go (top : cframe) (rest : list cframe) (nx : pc) (st' : list value) (s' : mstate) : mstep :=
   if stack_slots st' <=? c_max_stack (cf_code top)
@@ -820,9 +1491,54 @@ Definition invoke_run_model (p : program) (mdl : model) (s : mstate) (top : cfra
   | MNoModel => MStuck ("no model for " ++ cls ++ "." ++ mr_name mr ++ mr_desc mr)
   end.
 
+(** LambdaMetafactory's adaptation of the arguments to the implementation
+    method's parameter types: a box passed for a primitive parameter is unboxed
+    (null: NullPointerException).  Other conversions (boxing, widening, and a
+    return value that needs converting or dropping) are not modelled.
+    [Some (Some vs)] adapted values, [Some None] NullPointerException, [None] not modelled. *)
+Definition box_prim (c : string) : option jtype :=
+  if String.eqb c "java/lang/Integer" then Some TInt else if String.eqb c "java/lang/Long" then Some TLong
+  else if String.eqb c "java/lang/Short" then Some TShort else if String.eqb c "java/lang/Byte" then Some TByte
+  else if String.eqb c "java/lang/Character" then Some TChar else if String.eqb c "java/lang/Boolean" then Some TBool
+  else None.
+
+Definition is_prim (t : jtype) : bool := match t with TRef _ | TArr _ => false | _ => true end.
+
+Fixpoint lam_adapt (h : heap) (ts : list jtype) (vs : list value) : option (option (list value)) :=
+  match ts, vs with
+  | nil, nil => Some (Some nil)
+  | t :: ts', v :: vs' =>
+      let rest := lam_adapt h ts' vs' in
+      match is_prim t, v with
+      | true, VRef l =>
+          match h l with
+          | Some (OObj c [("value", w)]) =>
+              match box_prim c with
+              | Some bt => if String.eqb (type_desc bt) (type_desc t)
+                           then match rest with Some (Some ws) => Some (Some (w :: ws)) | r => r end
+                           else None
+              | None => None
+              end
+          | _ => None
+          end
+      | true, VNull => match rest with None => None | _ => Some None end
+      | true, _ => match rest with Some (Some ws) => Some (Some (v :: ws)) | r => r end
+      | false, (VRef _ | VNull) => match rest with Some (Some ws) => Some (Some (v :: ws)) | r => r end
+      | false, _ => None
+      end
+  | _, _ => None
+  end.
+
+Definition same_ret_kind (a b : option jtype) : bool :=
+  match a, b with
+  | None, None => true
+  | Some x, Some y => if is_prim x || is_prim y then String.eqb (type_desc x) (type_desc y) else true
+  | _, _ => false
+  end.
+
 (** Virtual / interface / special call on the object [ho] found at the receiver.
     [recur] performs a call through a lambda object (with less fuel). *)
-Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
+Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref -> list value -> mstep)
            (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
            (k : invoke_kind) (mr : methodref) (l : Z) (more : list value) (ho : option object)
            (r : list value) (nx : pc) : mstep :=
@@ -832,12 +1548,41 @@ Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
   match ho with
   | Some (OLam iface sam kind impl cap) =>
       if negb (match k with InvSpecial => true | _ => false end) && String.eqb (mr_name mr) sam then
+        match parse_mdesc (mr_desc impl), parse_mdesc (mr_desc mr) with
+        | Some (ips, irt), Some (_, srt) =>
+        let ips' := if (kind =? 6) || (kind =? 8) then ips else TRef (mr_class impl) :: ips in
+        let irt' := if kind =? 8 then Some (TRef (mr_class impl)) else irt in
+        if negb (same_ret_kind irt' srt) then MStuck "lambda: return value conversion not modelled" else
+        match lam_adapt (ms_heap s) ips' (app cap more) with
+        | None => MStuck "lambda: argument conversion not modelled"
+        | Some None => throw_new p s NPE
+        | Some (Some args') =>
         match invoke_kind_of_ref kind with
-        | Some k' => recur k' impl (app cap more)
-        | None => MStuck "lambda: constructor references are not modelled yet"
+        | Some k' => recur s r k' impl args'
+        | None =>
+          if kind =? 8 then
+            (* REF_newInvokeSpecial (Foo::new): invoking the handle initialises
+               Foo (JVMS 5.5), allocates the object and runs the constructor; the
+               new object is the result (pushed below the constructor's frame,
+               as new/dup/invokespecial does). *)
+            let c := mr_class impl in
+            if erroneous p 64 (ms_statics s) c then ncdfe p s c else
+            match init_needed p 64 (ms_inited s) c with
+            | Some _ => init_class p s c
+            | None =>
+              match instance_fields p 64 c with
+              | Some fs => let (l', s') := alloc s (OObj c fs) in
+                           recur s' (VRef l' :: r) InvSpecial impl (VRef l' :: args')
+              | None => MStuck "constructor reference: class not loaded and not modelled"
+              end
+            end
+          else MStuck "lambda: method handle kind not modelled"
+        end
+        end
+        | _, _ => MStuck "lambda: descriptor"
         end
       else
-        match resolve_full p iface (mr_name mr) (mr_desc mr) with
+        match resolve_full p (lam_primary iface) (mr_name mr) (mr_desc mr) with
         | Some (cn, m) => enter s caller rest cn m args nx
         | None => MStuck ("method " ++ mr_name mr ++ " on a lambda object is not modelled")
         end
@@ -850,7 +1595,7 @@ Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
                         | Some (OStr _) => Some "java/lang/String"
                         | Some (OSb _) => Some "java/lang/StringBuilder"
                         | Some (OCls _) => Some "java/lang/Class"
-                        | Some (OLam i _ _ _ _) => Some i
+                        | Some (OLam i _ _ _ _) => Some (lam_primary i)
                         | None => None
                         end
                  end in
@@ -862,12 +1607,32 @@ Definition invoke_obj (recur : invoke_kind -> methodref -> list value -> mstep)
           if Z.testbit (m_access m) 8 then invoke_run_model p mdl s top rest mr args r nx cn
           else enter s caller rest cn m args nx
       | None =>
-          (* not in a loaded class: the model of the first JDK class on the
-             receiver's superclass chain (e.g. java/lang/Enum for an enum), else
-             the model of the method as declared *)
+          (* the model of the first JDK class on the receiver's superclass chain
+             (e.g. java/lang/Enum for an enum); else full resolution and
+             selection (JVMS 5.4.3.3/5.4.3.4, 5.4.6, invokespecial 6.5); when
+             that reaches classes the machine does not know, the model of the
+             method as declared *)
           let jc := first_unloaded p 64 cn0 in
           match mdl jc (mr_name mr) (mr_desc mr) args s with
-          | MNoModel => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+          | MNoModel =>
+              let sl := match k with
+                        | InvSpecial => select_special p (cf_class top) mr
+                        | InvInterface => select_virtual p true mr cn0
+                        | _ => select_virtual p false mr cn0
+                        end in
+              match sl with
+              | SelEnter d m => if Z.testbit (m_access m) 8 then invoke_run_model p mdl s top rest mr args r nx d
+                                else enter s caller rest d m args nx
+              | SelModel d => invoke_run_model p mdl s top rest mr args r nx d
+              | SelThrow e =>
+                  (* a loaded model class of a JDK class may leave a method to the Rocq model *)
+                  match mdl (mr_class mr) (mr_name mr) (mr_desc mr) args s with
+                  | MNoModel => throw_new p s e
+                  | _ => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+                  end
+              | SelStuck why => MStuck why
+              | SelUnknown => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+              end
           | _ => invoke_run_model p mdl s top rest mr args r nx jc
           end
       end
@@ -880,24 +1645,63 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
   let caller := set_frame top (mkframe (f_pc f) r (f_locals f)) in
   match k with
   | InvStatic =>
-      if erroneous p 64 (ms_statics s) (mr_class mr) then throw_new p s "java/lang/NoClassDefFoundError" else
-      match init_needed p 64 (ms_inited s) (mr_class mr) with
-      | Some cf => start_init s cf
-      | None =>
+      (* JVMS 6.5 invokestatic: resolve, then initialise the class that
+         declares the resolved method.  Fast path: the referenced class is
+         initialised (so are its superclasses, where a static method found by
+         resolution is declared). *)
+      let slow :=
+        match resolve_method p (mr_interface mr) (mr_class mr) (mr_name mr) (mr_desc mr) with
+        | RFound (d, a, om) =>
+            if negb (acc_static a) then throw_new p s ICCE
+            else if erroneous p 64 (ms_statics s) d then ncdfe p s d
+            else match init_needed p 64 (ms_inited s) d with
+                 | Some _ => init_class p s d
+                 | None => match om with
+                           | Some m => if Z.testbit (m_access m) 8 then invoke_run_model p mdl s top rest mr args r nx d
+                                       else enter s caller rest d m args nx
+                           | None => invoke_run_model p mdl s top rest mr args r nx d
+                           end
+                 end
+        | RThrow e =>
+            (* a loaded model class of a JDK class (harness/jdkmodel) may leave a
+               method to the Rocq model of that class *)
+            match mdl (mr_class mr) (mr_name mr) (mr_desc mr) args s with
+            | MNoModel => throw_new p s e
+            | _ => if erroneous p 64 (ms_statics s) (mr_class mr) then throw_new p s "java/lang/NoClassDefFoundError"
+                   else match init_needed p 64 (ms_inited s) (mr_class mr) with
+                        | Some _ => init_class p s (mr_class mr)
+                        | None => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+                        end
+            end
+        | RUnknown => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+        end in
+      if negb (erroneous p 64 (ms_statics s) (mr_class mr))
+         && match init_needed p 64 (ms_inited s) (mr_class mr) with None => true | Some _ => false end then
         match resolve_full p (mr_class mr) (mr_name mr) (mr_desc mr) with
         | Some (cn, m) =>
             if Z.testbit (m_access m) 8 then invoke_run_model p mdl s top rest mr args r nx cn
             else enter s caller rest cn m args nx
-        | None => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+        | None => match mdl (mr_class mr) (mr_name mr) (mr_desc mr) args s with
+                  | MNoModel => slow
+                  | _ => invoke_run_model p mdl s top rest mr args r nx (mr_class mr)
+                  end
         end
-      end
+      else slow
   | InvSpecial | InvVirtual | InvInterface =>
       match args with
-      | VNull :: _ => throw_new p s NPE
+      | VNull :: _ =>
+          (* the method is resolved before the receiver is checked (JVMS 6.5); a
+             method of a class the machine does not know is assumed to resolve
+             (the JDK the code was compiled against) *)
+          match resolve_method p (mr_interface mr) (mr_class mr) (mr_name mr) (mr_desc mr) with
+          | RThrow e => throw_new p s e
+          | RFound (_, a, _) => if acc_static a then throw_new p s ICCE else throw_new p s NPE
+          | RUnknown => throw_new p s NPE
+          end
       | VRef l :: more =>
-          let recur k' impl args' :=
+          let recur s' r' k' impl args' :=
               match fuel with
-              | S fu => do_invoke fu p mdl s top rest k' impl args' r nx
+              | S fu => do_invoke fu p mdl s' top rest k' impl args' r' nx
               | O => MStuck "lambda: nesting"
               end in
           invoke_obj recur p mdl s top rest k mr l more (ms_heap s l) r nx
@@ -905,24 +1709,371 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
       end
   end.
 
-(** The implementation method of a LambdaMetafactory.metafactory call site. *)
-Definition lambda_site (cf : classfile) (bi : Z) : option (Z * methodref) :=
+(** The bootstrap method and static arguments of an invokedynamic call site. *)
+Definition bsm_site (cf : classfile) (bi : Z) : option (methodref * list Z) :=
   let* bms := bootstrap_methods cf in
   let* (mh, args) := nth_z bms bi in
   match cp_get (cf_cp cf) mh with
-  | Some (CPMethodHandle _ ref) =>
-      let* m := cp_methodref (cf_cp cf) ref in
-      if String.eqb (mr_class m) "java/lang/invoke/LambdaMetafactory" && String.eqb (mr_name m) "metafactory" then
-        match args with
-        | _ :: impl :: _ :: nil =>
-            match cp_get (cf_cp cf) impl with
-            | Some (CPMethodHandle kind iref) => let* im := cp_methodref (cf_cp cf) iref in Some (kind, im)
-            | _ => None
-            end
-        | _ => None
-        end
-      else None
+  | Some (CPMethodHandle _ ref) => let* m := cp_methodref (cf_cp cf) ref in Some (m, args)
   | _ => None
+  end.
+
+Definition is_bsm (m : methodref) (c n : string) : bool := String.eqb (mr_class m) c && String.eqb (mr_name m) n.
+
+(** The implementation method (kind, method) and the marker interfaces of a
+    LambdaMetafactory.metafactory / altMetafactory call site.  altMetafactory's
+    flags: 1 serializable (the object also implements java.io.Serializable),
+    2 markers (count, interfaces), 4 bridges (count, method types: further
+    descriptors of the same method name, which calls by name already cover). *)
+Definition lambda_site (cf : classfile) (bi : Z) : option (Z * methodref * list string) :=
+  let* (m, args) := bsm_site cf bi in
+  let impl_of (i : Z) := match cp_get (cf_cp cf) i with
+                         | Some (CPMethodHandle kind iref) => let* im := cp_methodref (cf_cp cf) iref in Some (kind, im)
+                         | _ => None
+                         end in
+  if is_bsm m "java/lang/invoke/LambdaMetafactory" "metafactory" then
+    match args with
+    | _ :: impl :: _ :: nil => let* (kind, im) := impl_of impl in Some (kind, im, nil)
+    | _ => None
+    end
+  else if is_bsm m "java/lang/invoke/LambdaMetafactory" "altMetafactory" then
+    match args with
+    | _ :: impl :: _ :: fl :: rest =>
+        let* (kind, im) := impl_of impl in
+        let* flags := match cp_get (cf_cp cf) fl with Some (CPInt z) => Some z | _ => None end in
+        let* markers :=
+          (if Z.testbit flags 1 then
+             match rest with
+             | n :: ms => match cp_get (cf_cp cf) n with
+                          | Some (CPInt k) => map_opt (cp_class (cf_cp cf)) (firstn (Z.to_nat k) ms)
+                          | _ => None
+                          end
+             | nil => None
+             end
+           else Some nil) in
+        Some (kind, im, app markers (if Z.testbit flags 0 then ["java/io/Serializable"] else nil))
+    | _ => None
+    end
+  else None.
+
+(** ** java.lang.runtime.ObjectMethods.bootstrap (records' toString, equals, hashCode). *)
+Fixpoint split_units (u : list Z) (cur : list Z) : list (list Z) :=
+  match u with
+  | nil => [rev cur]
+  | c :: r => if c =? 59 then rev cur :: split_units r nil else split_units r (c :: cur)
+  end.
+
+(** (record class, component names, component fields) *)
+Definition record_site (cf : classfile) (args : list Z) : option (string * list (list Z) * list fieldref) :=
+  match args with
+  | ci :: ni :: gs =>
+      let* rc := cp_class (cf_cp cf) ci in
+      let* names := match cp_get (cf_cp cf) ni with
+                    | Some (CPString u) => let* raw := cp_utf8 (cf_cp cf) u in utf8_units raw
+                    | _ => None
+                    end in
+      let* getters := map_opt (fun g => match cp_get (cf_cp cf) g with
+                                       | Some (CPMethodHandle k r) => if k =? 1 then cp_fieldref (cf_cp cf) r else None
+                                       | _ => None
+                                       end) gs in
+      Some (rc, (match getters with nil => nil | _ => split_units names nil end), getters)
+  | _ => None
+  end.
+
+(** Class.getSimpleName: the inner name of the class's own InnerClasses entry,
+    else (a top-level class) the name after the last '/'. *)
+Fixpoint ic_scan (c : cp) (this : string) (n : nat) (l : bytes) : option (option Z) :=
+  match n with
+  | O => Some None
+  | S k =>
+    let* (inner, l) := u2 l in let* (_, l) := u2 l in let* (nm, l) := u2 l in let* (_, l) := u2 l in
+    if match cp_class c inner with Some x => String.eqb x this | None => false end then Some (Some nm)
+    else ic_scan c this k l
+  end.
+
+Definition simple_name (cf : classfile) : option (list Z) :=
+  let top := let* raw := Some (match last_slash (cf_this cf) 0 None with
+                                | Some i => substring (S i) (String.length (cf_this cf)) (cf_this cf)
+                                | None => cf_this cf
+                                end) in utf8_units raw in
+  match find_attr "InnerClasses" (cf_attrs cf) with
+  | None => top
+  | Some bs =>
+      let* (n, l) := u2 bs in
+      let* e := ic_scan (cf_cp cf) (cf_this cf) (Z.to_nat n) l in
+      match e with
+      | None => top
+      | Some nm => if nm =? 0 then Some nil else let* raw := cp_utf8 (cf_cp cf) nm in utf8_units raw
+      end
+  end.
+
+Definition true_units : list Z := [116; 114; 117; 101].
+Definition false_units : list Z := [102; 97; 108; 115; 101].
+
+(** String.valueOf of a component (Objects.toString for references): primitives,
+    null, Strings and the modelled boxes; float/double and other objects (a
+    toString() call back into bytecode) are not modelled. *)
+Definition component_units (h : heap) (t : jtype) (v : value) : string + list Z :=
+  match t, v with
+  | (TInt | TShort | TByte), VInt z => inr (z_units z)
+  | TLong, VLong z => inr (z_units z)
+  | TChar, VInt z => inr [z]
+  | TBool, VInt z => inr (if z =? 0 then false_units else true_units)
+  | (TRef _ | TArr _), VNull => inr [110; 117; 108; 108]
+  | (TRef _ | TArr _), VRef l =>
+      match h l with
+      | Some (OStr u) => inr u
+      | Some (OObj c [("value", w)]) =>
+          match w with
+          | VInt z => if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Short" || String.eqb c "java/lang/Byte"
+                      then inr (z_units z)
+                      else if String.eqb c "java/lang/Character" then inr [z]
+                      else if String.eqb c "java/lang/Boolean" then inr (if z =? 0 then false_units else true_units)
+                      else inl "record toString: component needs toString() (callback not modelled)"
+          | VLong z => if String.eqb c "java/lang/Long" then inr (z_units z)
+                       else inl "record toString: component needs toString() (callback not modelled)"
+          | _ => inl "record toString: component needs toString() (callback not modelled)"
+          end
+      | _ => inl "record toString: component needs toString() (callback not modelled)"
+      end
+  | (TFloat | TDouble), _ => inl "record toString: float/double component (Float/Double.toString not modelled)"
+  | _, _ => inl "record toString: component type"
+  end.
+
+Fixpoint units_eqb (a b : list Z) : bool :=
+  match a, b with
+  | nil, nil => true
+  | x :: a', y :: b' => (x =? y) && units_eqb a' b'
+  | _, _ => false
+  end.
+
+Definition string_hash (u : list Z) : Z := fold_left (fun h c => wrap32 (h * 31 + c)) u 0.
+Definition long_hash (z : Z) : Z := let u := z mod 2 ^ 64 in wrap32 (Z.lxor u (Z.shiftr u 32)).
+
+(** Integer/Long/.../Float/Double/Boolean.hashCode of a primitive, Objects.hashCode of a reference. *)
+Definition component_hash (h : heap) (t : jtype) (v : value) : option Z :=
+  match t, v with
+  | (TInt | TShort | TByte | TChar), VInt z => Some z
+  | TBool, VInt z => Some (if z =? 0 then 1237 else 1231)
+  | TLong, VLong z => Some (long_hash z)
+  | TFloat, VFloat b => Some (wrap32 (Float.canon32 b))
+  | TDouble, VDouble b => Some (long_hash (Float.canon64 b))
+  | (TRef _ | TArr _), VNull => Some 0
+  | (TRef _ | TArr _), VRef l =>
+      match h l with
+      | Some (OStr u) => Some (string_hash u)
+      | Some (OObj c [("value", w)]) =>
+          match w with
+          | VInt z => if String.eqb c "java/lang/Boolean" then Some (if z =? 0 then 1237 else 1231)
+                      else if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Short"
+                              || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character" then Some z
+                      else None
+          | VLong z => if String.eqb c "java/lang/Long" then Some (long_hash z) else None
+          | _ => None
+          end
+      | _ => None
+      end
+  | _, _ => None
+  end.
+
+(** ObjectMethods' equalator: == for int-like/long/boolean, Float/Double.compare == 0,
+    Objects.equals for references (Strings and the modelled boxes; another
+    object's equals() would be a call back into bytecode). *)
+Definition component_eq (h : heap) (t : jtype) (a b : value) : option bool :=
+  match t, a, b with
+  | (TInt | TShort | TByte | TChar | TBool), VInt x, VInt y => Some (x =? y)
+  | TLong, VLong x, VLong y => Some (x =? y)
+  | TFloat, VFloat x, VFloat y => Some (Float.canon32 x =? Float.canon32 y)
+  | TDouble, VDouble x, VDouble y => Some (Float.canon64 x =? Float.canon64 y)
+  | (TRef _ | TArr _), VNull, VNull => Some true
+  | (TRef _ | TArr _), VNull, VRef _ => Some false
+  | (TRef _ | TArr _), VRef x, _ =>
+      if match b with VRef y => x =? y | _ => false end then Some true else
+      match h x with
+      | Some (OStr u) => match b with
+                         | VRef y => match h y with Some (OStr u') => Some (units_eqb u u') | _ => Some false end
+                         | _ => Some false
+                         end
+      | Some (OObj c [("value", w)]) =>
+          if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Long" || String.eqb c "java/lang/Short"
+             || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character" || String.eqb c "java/lang/Boolean" then
+            match b with
+            | VRef y => match h y with
+                        | Some (OObj c' [("value", w')]) =>
+                            Some (String.eqb c c' && match w, w' with
+                                                     | VInt i, VInt j | VLong i, VLong j => i =? j
+                                                     | _, _ => false
+                                                     end)
+                        | _ => Some false
+                        end
+            | _ => Some false
+            end
+          else None
+      | _ => None
+      end
+  | _, _, _ => None
+  end.
+
+Definition record_component (p : program) (h : heap) (o : Z) (g : fieldref) : option (jtype * value) :=
+  match h o, field_type (fr_desc g) with
+  | Some (OObj _ fs), Some t => option_map (fun v => (t, v)) (obj_get p g fs)
+  | _, _ => None
+  end.
+
+Definition record_to_string (p : program) (h : heap) (rcf : classfile) (names : list (list Z))
+           (gs : list fieldref) (o : Z) : string + list Z :=
+  match simple_name rcf with
+  | None => inl "record toString: class name"
+  | Some sn =>
+    let fix go (ns : list (list Z)) (gs : list fieldref) (first : bool) : string + list Z :=
+      match ns, gs with
+      | nil, nil => inr [93]
+      | n :: ns', g :: gs' =>
+          match record_component p h o g with
+          | None => inl "record toString: component field"
+          | Some (t, v) =>
+              match component_units h t v, go ns' gs' false with
+              | inr a, inr b => inr (app (if first then nil else [44; 32]) (app n (61 :: app a b)))
+              | inl e, _ | _, inl e => inl e
+              end
+          end
+      | _, _ => inl "record toString: names and getters differ"
+      end in
+    match go names gs true with
+    | inr b => inr (app sn (91 :: b))
+    | inl e => inl e
+    end
+  end.
+
+Definition record_hash (p : program) (h : heap) (gs : list fieldref) (o : Z) : option Z :=
+  fold_left (fun acc g => let* a := acc in let* (t, v) := record_component p h o g in
+                          let* x := component_hash h t v in Some (wrap32 (a * 31 + x))) gs (Some 0).
+
+(** equals: the same object; else not an instance of the record class: false;
+    else the components, compared from the last to the first (the nesting of
+    ObjectMethods.makeEquals' guardWithTest), stopping at the first difference. *)
+Definition record_equals (p : program) (h : heap) (rc : string) (gs : list fieldref) (o : Z) (other : value)
+  : option bool :=
+  match other with
+  | VNull => Some false
+  | VRef x =>
+    if x =? o then Some true else
+    match h x with
+    | None => None
+    | Some ox =>
+      match obj_assignable p ox rc with
+      | Some false => Some false
+      | None => None
+      | Some true =>
+          fold_left (fun acc g => match acc with
+                                  | Some true =>
+                                      match record_component p h o g, record_component p h x g with
+                                      | Some (t, a), Some (_, b) => component_eq h t a b
+                                      | _, _ => None
+                                      end
+                                  | r => r
+                                  end) (rev gs) (Some true)
+      end
+    end
+  | _ => None
+  end.
+
+(** ** java.lang.runtime.SwitchBootstraps.typeSwitch / enumSwitch (JDK 21). *)
+Inductive slabel : Type := SLClass (c : string) | SLStr (u : list Z) | SLInt (z : Z) | SLEnum (e : string) (n : string).
+
+Definition switch_labels (cf : classfile) (enum_cls : option string) (args : list Z) : option (list slabel) :=
+  map_opt (fun i =>
+    match cp_get (cf_cp cf) i, enum_cls with
+    | Some (CPClass _), _ => option_map SLClass (cp_class (cf_cp cf) i)
+    | Some (CPString u), None => let* raw := cp_utf8 (cf_cp cf) u in let* us := utf8_units raw in Some (SLStr us)
+    | Some (CPString u), Some e => let* raw := cp_utf8 (cf_cp cf) u in Some (SLEnum e raw)
+    | Some (CPInt z), None => Some (SLInt z)
+    | _, _ => None          (* EnumDesc / other dynamic constants: not modelled *)
+    end) args.
+
+(** The class whose superclass is java.lang.Enum (Enum.getDeclaringClass). *)
+Fixpoint enum_decl (p : program) (fuel : nat) (c : string) : option string :=
+  match fuel with
+  | O => None
+  | S k => match find_class p c with
+           | Some cf => match cf_super cf with
+                        | Some s => if String.eqb s "java/lang/Enum" then Some c else enum_decl p k s
+                        | None => None
+                        end
+           | None => None
+           end
+  end.
+
+Definition label_matches (p : program) (s : mstate) (o : Z) (lb : slabel) : option bool :=
+  match ms_heap s o with
+  | None => None
+  | Some ob =>
+    match lb with
+    | SLClass c => obj_assignable p ob c
+    | SLStr u => match ob with
+                 | OStr u' => Some (units_eqb u u')
+                 | OObj c _ => if is_box_name c then Some false else None   (* target.equals(label) *)
+                 | OArr _ _ | OLam _ _ _ _ _ | OCls _ => Some false      (* Object.equals: identity *)
+                 | OSb _ => Some false
+                 end
+    | SLInt k => match ob with
+                 | OObj c [("value", w)] =>
+                     match w with
+                     | VInt z => if String.eqb c "java/lang/Integer" || String.eqb c "java/lang/Short"
+                                    || String.eqb c "java/lang/Byte" || String.eqb c "java/lang/Character"
+                                 then Some (k =? z) else if String.eqb c "java/lang/Boolean" then Some false else None
+                     | VLong z => if String.eqb c "java/lang/Long" then Some (k =? wrap32 z) else None
+                     | _ => None
+                     end
+                 | OStr _ | OArr _ _ | OLam _ _ _ _ _ | OCls _ | OSb _ => Some false
+                 | OObj c _ => match subclass p 64 c "java/lang/Number" with Some false => Some false | _ => None end
+                 end
+    | SLEnum e n =>
+        match ob with
+        | OObj c _ =>
+            match enum_decl p 64 c with
+            | Some d => if negb (String.eqb d e) then Some false else
+                        match find_class p e with
+                        | Some ecf => match mb_find n ("L" ++ e ++ ";") (cf_fields ecf) with
+                                      | Some a => if Z.testbit a 14 && acc_static a then
+                                                    match assoc (static_key e n) (ms_statics s) with
+                                                    | Some (VRef x) => Some (x =? o)
+                                                    | Some _ => Some false
+                                                    | None => None
+                                                    end
+                                                  else Some false
+                                      | None => Some false
+                                      end
+                        | None => None
+                        end
+            | None => match subclass p 64 c "java/lang/Enum" with Some false => Some false | _ => None end
+            end
+        | _ => Some false
+        end
+    end
+  end.
+
+Fixpoint switch_index (p : program) (s : mstate) (o : Z) (lbs : list slabel) (i : Z) : option Z :=
+  match lbs with
+  | nil => Some i
+  | lb :: r => match label_matches p s o lb with
+               | Some true => Some i
+               | Some false => switch_index p s o r (i + 1)
+               | None => None
+               end
+  end.
+
+(** multianewarray with a negative count: HotSpot allocates depth first, so the
+    NegativeArraySizeException names the first negative count met on the way down
+    (after a zero count, the first negative of the remaining ones); an allocation
+    above the model bound before that is [None] (OutOfMemoryError possible). *)
+Fixpoint multi_neg (ns : list Z) : option (option Z) :=
+  match ns with
+  | nil => Some None
+  | n :: r => if n <? 0 then Some (Some n)
+              else if n =? 0 then Some (match filter (fun k => k <? 0) r with k :: _ => Some k | nil => None end)
+              else if MAX_ARRAY <? n then (if existsb (fun k => k <? 0) r then None else multi_neg r)
+              else multi_neg r
   end.
 
 (** multianewarray: nested arrays for the given counts (outermost first). *)
@@ -953,6 +2104,97 @@ Fixpoint multi_alloc (fuel : nat) (s : mstate) (t : jtype) (counts : list Z) : o
     end
   end.
 
+(** invokedynamic call sites other than string concatenation and lambdas. *)
+Definition indy_other (p : program) (s : mstate) (top : cframe) (rest : list cframe) (cf : classfile)
+           (bi : Z) (name desc : string) (st : list value) (nx : pc) : mstep :=
+  let go (st' : list value) (s' : mstate) : mstep :=
+    if stack_slots st' <=? c_max_stack (cf_code top)
+    then MNext (with_frames s' (set_frame top (mkframe nx st' (f_locals (cf_frame top))) :: rest))
+    else MStuck "operand stack overflow (max_stack)" in
+  match bsm_site cf bi, parse_mdesc desc with
+  | Some (m, args), Some (ps, _) =>
+    if is_bsm m "java/lang/runtime/ObjectMethods" "bootstrap" then
+      match record_site cf args with
+      | None => MStuck "ObjectMethods.bootstrap: static arguments"
+      | Some (rc, names, gs) =>
+        match find_class p rc with
+        | None => MStuck "ObjectMethods.bootstrap: record class not loaded"
+        | Some rcf =>
+          if String.eqb name "toString" then
+            match st with
+            | VRef o :: r => match record_to_string p (ms_heap s) rcf names gs o with
+                             | inr u => let (l, s') := alloc s (OStr u) in go (VRef l :: r) s'
+                             | inl why => MStuck why
+                             end
+            | VNull :: _ => throw_new p s NPE
+            | _ => MStuck "ObjectMethods: operand"
+            end
+          else if String.eqb name "hashCode" then
+            match st with
+            | VRef o :: r => match record_hash p (ms_heap s) gs o with
+                             | Some z => go (VInt z :: r) s
+                             | None => MStuck "record hashCode: component needs hashCode() (identity hash or callback not modelled)"
+                             end
+            | VNull :: _ => throw_new p s NPE
+            | _ => MStuck "ObjectMethods: operand"
+            end
+          else if String.eqb name "equals" then
+            match st with
+            | other :: VRef o :: r => match record_equals p (ms_heap s) rc gs o other with
+                                      | Some b => go (VInt (if b then 1 else 0) :: r) s
+                                      | None => MStuck "record equals: component needs equals() (callback not modelled)"
+                                      end
+            | _ :: VNull :: _ => throw_new p s NPE
+            | _ => MStuck "ObjectMethods: operand"
+            end
+          else MStuck "ObjectMethods.bootstrap: method name"
+        end
+      end
+    else if is_bsm m "java/lang/runtime/SwitchBootstraps" "typeSwitch"
+            || is_bsm m "java/lang/runtime/SwitchBootstraps" "enumSwitch" then
+      let enum_cls := if String.eqb (mr_name m) "enumSwitch"
+                      then match ps with TRef e :: _ => Some e | _ => None end else None in
+      if String.eqb (mr_name m) "enumSwitch" && match enum_cls with None => true | _ => false end
+      then MStuck "enumSwitch: invocation type" else
+      match switch_labels cf enum_cls args with
+      | None => MStuck "SwitchBootstraps: label kind not modelled (EnumDesc / dynamic constant)"
+      | Some lbs =>
+        if negb (forallb (fun lb => match lb, enum_cls with SLClass c, Some e => String.eqb c e | _, _ => true end) lbs)
+        then MStuck "enumSwitch: a Class label that is not the enum class (BootstrapMethodError)" else
+        match st with
+        | VInt restart :: target :: r =>
+            (* Objects.checkIndex(restart, labels.length + 1) comes first *)
+            if (restart <? 0) || (Z.of_nat (length lbs) <? restart)
+            then throw_new p s "java/lang/IndexOutOfBoundsException" else
+            match target with
+            | VNull => go (VInt (-1) :: r) s
+            | VRef o => match switch_index p s o (skipn (Z.to_nat restart) lbs) restart with
+                        | Some i => go (VInt i :: r) s
+                        | None => MStuck "SwitchBootstraps: a label test needs a call back into bytecode"
+                        end
+            | _ => MStuck "SwitchBootstraps: operand"
+            end
+        | _ => MStuck "SwitchBootstraps: operand"
+        end
+      end
+    else MStuck "invokedynamic: bootstrap method not modelled"
+  | _, _ => MStuck "invokedynamic: bootstrap method not modelled"
+  end.
+
+(** getfield/putfield when the receiver is null or the object has no field of
+    that key: resolution comes first (JVMS 6.5), so NoSuchFieldError /
+    IncompatibleClassChangeError take precedence; otherwise [otherwise] is
+    thrown (NullPointerException) or, when it is not an exception class, the
+    step is stuck.  A field of a class the machine does not know is assumed
+    to resolve. *)
+Definition instance_field_error (p : program) (s : mstate) (fr : fieldref) (otherwise : string) : mstep :=
+  match resolve_field p fr with
+  | FNotFound => throw_new p s NSFE
+  | FFound _ a => if acc_static a then throw_new p s ICCE
+                  else if String.eqb otherwise NPE then throw_new p s NPE else MStuck otherwise
+  | FUnknown => if String.eqb otherwise NPE then throw_new p s NPE else MStuck otherwise
+  end.
+
 (** ** One machine step *)
 Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
   match ms_frames s with
@@ -968,7 +2210,8 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
       then MNext (with_frames s' (set_frame top f' :: rest))
       else MStuck "operand stack overflow (max_stack)" in
   match fetch (c_instrs c) (f_pc f) (c_length c) with
-  | None => MStuck "no instruction at pc"
+  | None => if cf_clinit top && Z.eqb (f_pc f) (-1) then clinit_prepare p s top rest
+            else MStuck "no instruction at pc"
   | Some (i, nx) =>
     let go st' s' := put_top (mkframe nx st' lv) s' in
     if is_local_instr i then
@@ -976,16 +2219,17 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
       match step c (cf_rt top) f with
       | Normal f' => put_top f' s
       | Done v => if cf_clinit top then return_to s None rest else return_to s v rest
-      | Throw cn => throw_new p s cn
+      | Throw cn => if String.eqb cn "java/lang/ArithmeticException"
+                    then throw_msg p s cn (Some (ascii_units "/ by zero")) else throw_new p s cn
       | Stuck why => MStuck why
       end
     else
     match i with
     (* ---- objects ---- *)
     | New cn =>
-        if erroneous p 64 (ms_statics s) cn then throw_new p s "java/lang/NoClassDefFoundError" else
+        if erroneous p 64 (ms_statics s) cn then ncdfe p s cn else
         match init_needed p 64 (ms_inited s) cn with
-        | Some cf => start_init s cf
+        | Some _ => init_class p s cn
         | None =>
           match instance_fields p 64 cn with
           | Some fs => let (l, s') := alloc s (OObj cn fs) in go (VRef l :: st) s'
@@ -994,13 +2238,17 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | Getfield fr =>
         match st with
-        | VNull :: _ => throw_new p s NPE
+        | VNull :: _ => instance_field_error p s fr NPE
         | VRef l :: r =>
             match h l with
             | Some (OObj _ fs) =>
-                match assoc (fr_name fr) fs with
-                | Some v => go (v :: r) s
-                | None => MStuck "getfield: no such field"
+                match field_slot p fr fs with
+                | FSKey key => match assoc key fs with
+                               | Some v => go (v :: r) s
+                               | None => instance_field_error p s fr "getfield: the object has no such field"
+                               end
+                | FSThrow e => throw_new p s e
+                | FSStuck why => MStuck why
                 end
             | _ => MStuck "getfield: not an object"
             end
@@ -1008,64 +2256,72 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | Putfield fr =>
         match st, field_type (fr_desc fr) with
-        | v :: VNull :: _, _ => throw_new p s NPE
+        | v :: VNull :: _, _ => instance_field_error p s fr NPE
         | v :: VRef l :: r, Some t =>
             if negb (value_fits t v) then MStuck "putfield: value type" else
             match h l with
             | Some (OObj cn fs) =>
-                match set_assoc (fr_name fr) (narrow_store t v) fs with
-                | Some fs' =>
-                    go r {| ms_heap := upd h l (OObj cn fs'); ms_next := ms_next s;
-                            ms_statics := ms_statics s; ms_inited := ms_inited s;
-                            ms_locks := ms_locks s; ms_frames := ms_frames s |}
-                | None => MStuck "putfield: no such field"
+                match field_slot p fr fs with
+                | FSKey key =>
+                    match set_assoc key (narrow_store t v) fs with
+                    | Some fs' =>
+                        go r {| ms_heap := upd h l (OObj cn fs'); ms_next := ms_next s;
+                                ms_statics := ms_statics s; ms_inited := ms_inited s;
+                                ms_locks := ms_locks s; ms_frames := ms_frames s |}
+                    | None => instance_field_error p s fr "putfield: the object has no such field"
+                    end
+                | FSThrow e => throw_new p s e
+                | FSStuck why => MStuck why
                 end
             | _ => MStuck "putfield: not an object"
             end
         | _, _ => MStuck "putfield: operand"
         end
     | Getstatic fr =>
-        if erroneous p 64 (ms_statics s) (fr_class fr) then throw_new p s "java/lang/NoClassDefFoundError" else
-        match init_needed p 64 (ms_inited s) (fr_class fr) with
-        | Some cf => start_init s cf
-        | None =>
-          match assoc (static_key (fr_class fr) (fr_name fr)) (ms_statics s) with
-          | Some v => go (v :: st) s
-          | None =>
-              (* a static field of a JDK class: its model, as a pseudo-method "<get>name" *)
-              match find_class p (fr_class fr) with
-              | None => match mdl (fr_class fr) ("<get>" ++ fr_name fr) (fr_desc fr) nil s with
-                        | MOk (Some v) s' => go (v :: st) (with_frames s' (ms_frames s))
-                        | MThrow cn => throw_new p s cn
-                        | MStuckModel why => MStuck why
-                        | _ => MStuck ("no model for the static field " ++ fr_class fr ++ "." ++ fr_name fr)
-                        end
-              | Some _ => MStuck "getstatic: inherited static field (resolution through superclasses not modelled yet)"
-              end
-          end
+        match static_target p s fr with
+        | STKey key =>
+            match assoc key (ms_statics s) with
+            | Some v => go (v :: st) s
+            | None => MStuck "getstatic: static field not set"
+            end
+        | STInit d => init_class p s d
+        | STThrow e => throw_new p s e
+        | STNcdfe d => ncdfe p s d
+        | STJdk d =>
+            (* a static field of a JDK class: its model, as a pseudo-method "<get>name" *)
+            match mdl d ("<get>" ++ fr_name fr) (fr_desc fr) nil s with
+            | MOk (Some v) s' => go (v :: st) (with_frames s' (ms_frames s))
+            | MThrow cn => throw_new p s cn
+            | MStuckModel why => MStuck why
+            | _ => MStuck ("no model for the static field " ++ d ++ "." ++ fr_name fr)
+            end
+        | STStuck why => MStuck why
         end
     | Putstatic fr =>
-        if erroneous p 64 (ms_statics s) (fr_class fr) then throw_new p s "java/lang/NoClassDefFoundError" else
-        match init_needed p 64 (ms_inited s) (fr_class fr) with
-        | Some cf => start_init s cf
-        | None =>
+        match static_target p s fr with
+        | STKey key =>
           match st, field_type (fr_desc fr) with
           | v :: r, Some t =>
               if negb (value_fits t v) then MStuck "putstatic: value type" else
-              match set_assoc (static_key (fr_class fr) (fr_name fr)) (narrow_store t v) (ms_statics s) with
+              match set_assoc key (narrow_store t v) (ms_statics s) with
               | Some sts =>
                   go r {| ms_heap := h; ms_next := ms_next s; ms_statics := sts;
                           ms_inited := ms_inited s; ms_locks := ms_locks s; ms_frames := ms_frames s |}
-              | None => MStuck "putstatic: field of a class that is not loaded"
+              | None => MStuck "putstatic: static field not set"
               end
           | _, _ => MStuck "putstatic: operand"
           end
+        | STInit d => init_class p s d
+        | STThrow e => throw_new p s e
+        | STNcdfe d => ncdfe p s d
+        | STJdk d => MStuck ("putstatic to a static field of a JDK class: " ++ d ++ "." ++ fr_name fr)
+        | STStuck why => MStuck why
         end
     (* ---- arrays ---- *)
     | Newarray t =>
         match st, elem_of_atype t with
         | VInt n :: r, Some e =>
-            if n <? 0 then throw_new p s "java/lang/NegativeArraySizeException"
+            if n <? 0 then throw_msg p s "java/lang/NegativeArraySizeException" (Some (z_units n))
             else if MAX_ARRAY <? n then MStuck "array larger than the model bound (OutOfMemoryError possible)"
             else let (l, s') := alloc s (OArr e (repeat (default_of e) (Z.to_nat n))) in go (VRef l :: r) s'
         | _, _ => MStuck "newarray: operand"
@@ -1073,7 +2329,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
     | Anewarray cn =>
         match st with
         | VInt n :: r =>
-            if n <? 0 then throw_new p s "java/lang/NegativeArraySizeException"
+            if n <? 0 then throw_msg p s "java/lang/NegativeArraySizeException" (Some (z_units n))
             else if MAX_ARRAY <? n then MStuck "array larger than the model bound (OutOfMemoryError possible)"
             else let (l, s') := alloc s (OArr (class_type cn) (repeat VNull (Z.to_nat n))) in go (VRef l :: r) s'
         | _ => MStuck "anewarray: operand"
@@ -1095,7 +2351,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             match h l with
             | Some (OArr e es) =>
                 if negb (akind_load_ok k e) then MStuck "xaload: array kind" else
-                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_new p s AIOOBE
+                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_msg p s AIOOBE (Some (aioobe_msg idx (length es)))
                 else match nth_z es idx with Some v => go (v :: r) s | None => MStuck "xaload" end
             | _ => MStuck "xaload: not an array"
             end
@@ -1108,7 +2364,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             match h l with
             | Some (OArr e es) =>
                 if negb (akind_ok k e v) then MStuck "xastore: array kind" else
-                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_new p s AIOOBE
+                if (idx <? 0) || (Z.of_nat (length es) <=? idx) then throw_msg p s AIOOBE (Some (aioobe_msg idx (length es)))
                 else
                   let store s := go r {| ms_heap := upd h l (OArr e (set_nth_z es idx (narrow_store e v)));
                                          ms_next := ms_next s; ms_statics := ms_statics s;
@@ -1118,10 +2374,15 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                   | VRef vl =>
                       match h vl with
                       | Some o =>
-                          match assignable p 64 (runtime_type o) (match e with TArr _ => type_desc e
-                                                                         | TRef c => c | _ => "" end) with
+                          match obj_assignable p o (match e with TArr _ => type_desc e
+                                                                     | TRef c => c | _ => "" end) with
                           | Some true => store s
-                          | Some false => throw_new p s "java/lang/ArrayStoreException"
+                          | Some false => match o with
+                                          | OLam _ _ _ _ _ => throw_new p s "java/lang/ArrayStoreException"
+                                          | _ => throw_msg p s "java/lang/ArrayStoreException"
+                                                           (Some (class_name_units (match runtime_type o with
+                                                                                    | TRef c => c | t => type_desc t end)))
+                                          end
                           | None => MStuck "aastore: cannot decide the element type"
                           end
                       | None => MStuck "aastore: dangling reference"
@@ -1145,7 +2406,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         | VNull :: _ => go st s
         | VRef l :: _ =>
             match h l with
-            | Some o => match assignable p 64 (runtime_type o) cn with
+            | Some o => match obj_assignable p o cn with
                         | Some true => go st s
                         | Some false => throw_new p s "java/lang/ClassCastException"
                         | None => MStuck "checkcast: cannot decide"
@@ -1159,7 +2420,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         | VNull :: r => go (VInt 0 :: r) s
         | VRef l :: r =>
             match h l with
-            | Some o => match assignable p 64 (runtime_type o) cn with
+            | Some o => match obj_assignable p o cn with
                         | Some b => go (VInt (if b then 1 else 0) :: r) s
                         | None => MStuck "instanceof: cannot decide"
                         end
@@ -1182,7 +2443,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         | VNull :: _ => throw_new p s NPE
         | VRef l :: r =>
             let n := lock_count (ms_locks s) l in
-            if n <=? 0 then throw_new p s "java/lang/IllegalMonitorStateException"
+            if n <=? 0 then throw_msg p s "java/lang/IllegalMonitorStateException" (Some (ascii_units "current thread is not owner"))
             else go r {| ms_heap := h; ms_next := ms_next s; ms_statics := ms_statics s;
                          ms_inited := ms_inited s; ms_locks := (l, n - 1) :: ms_locks s;
                          ms_frames := ms_frames s |}
@@ -1221,11 +2482,12 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                   end
               | None => MStuck "invokedynamic: operand stack"
               end
-          | _, Some (ps, Some (TRef iface)) =>
+          | _, Some (ps, Some (TRef iface0)) =>
               match lambda_site cf bi with
-              | Some (kind, impl) =>
+              | Some (kind, impl, markers) =>
                   match pop_n (length ps) st with
                   | Some (cap, r) =>
+                      let iface := fold_left (fun acc m => acc ++ ";" ++ m) markers iface0 in
                       let o := OLam iface name kind impl cap in
                       (* non-capturing lambdas are one object per call site *)
                       let (l, s') := match cap with
@@ -1243,9 +2505,9 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
                       go (VRef l :: r) s'
                   | None => MStuck "invokedynamic: operand stack"
                   end
-              | None => MStuck "invokedynamic: bootstrap method not modelled (only string concatenation and LambdaMetafactory.metafactory)"
+              | None => indy_other p s top rest cf bi name desc st nx
               end
-          | _, _ => MStuck "invokedynamic: bootstrap method not modelled"
+          | _, _ => indy_other p s top rest cf bi name desc st nx
           end
         end
     | Multianewarray cn dims =>
@@ -1254,13 +2516,17 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
             if negb (forallb (fun v => match v with VInt _ => true | _ => false end) counts)
             then MStuck "multianewarray: operand" else
             let ns := map (fun v => match v with VInt n => n | _ => 0 end) counts in
-            if existsb (fun n => n <? 0) ns then throw_new p s "java/lang/NegativeArraySizeException"
-            else if existsb (fun n => MAX_ARRAY <? n) ns || (MAX_ARRAY <? fold_left Z.mul ns 1)
+            match multi_neg ns with
+            | None => MStuck "array larger than the model bound (OutOfMemoryError possible)"
+            | Some (Some n) => throw_msg p s "java/lang/NegativeArraySizeException" (Some (z_units n))
+            | Some None =>
+            if existsb (fun n => MAX_ARRAY <? n) ns || (MAX_ARRAY <? fold_left Z.mul ns 1)
             then MStuck "array larger than the model bound (OutOfMemoryError possible)"
             else match multi_alloc 256 s (class_type cn) ns with
                  | Some (l, s') => go (VRef l :: r) s'
                  | None => MStuck "multianewarray: type"
                  end
+            end
         | None => MStuck "multianewarray: operand stack"
         end
     | _ => MStuck "unreachable: frame-local instruction"

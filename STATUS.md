@@ -2,7 +2,7 @@
 
 Rocq 9.3.0 + rocq-stdlib 9.2.0. Build: `make` (uses `rocq makefile`, `-j1`; about 16 minutes, most of it the
 kernel-computed whole-class checks in `WalScenario.v` and `CimScenario.v`). Trust base: `TRUST.md`. Opcode table: `docs/opcode-coverage.md`.
-Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-24, 08:00 IST.
+Differential-test logs: `harness/results/*.tsv`, `harness/work/*.log` (not committed). Updated 2026-10-25 (model-gaps merged: field/method resolution, initialisation order, invokedynamic bootstraps, exception messages).
 
 Every theorem listed below: `Print Assumptions` = "Closed under the global context" (no axioms, nothing admitted).
 
@@ -17,12 +17,15 @@ Every theorem listed below: `Print Assumptions` = "Closed under the global conte
 | machine: heap objects, arrays (all kinds, store checks), exceptions as objects + handler search across frames, all invoke kinds with resolution, virtual/interface dispatch, default methods, `<clinit>` (JVMS 5.5) incl. `ExceptionInInitializerError` / `NoClassDefFoundError`, checkcast/instanceof incl. arrays, monitors (single thread), String/Class constants (interned), `invokedynamic` for string concatenation and lambdas/method refs, multianewarray | `Core/Machine.v` | done |
 | JDK models: String, StringBuilder, Character (Unicode tables are parameters), Integer/Long/Math, boxing with the JLS caches, Objects, System.arraycopy, Arrays.fill/copyOf, array clone, Enum, slf4j loggers, exception constructors | `Jdk/Strings.v`, `Jdk/Jdk.v` | done for what the corpora use |
 | java.util collections (as clean-room Java model classes, loaded by the machine) | `harness/jdkmodel/`, `classes/jdkmodel` | done for Iterator/ListIterator/Collection/List/Set/Map(+Entry) with defaults, AbstractCollection/List/Set/Map, ArrayList, HashMap (tree bins, JDK iteration order), LinkedHashMap (access order, removeEldestEntry), HashSet/LinkedHashSet, Collections empty/singleton/unmodifiable, Arrays.asList; 14 targets x 10,000 inputs, 0 mismatches; 5 canaries detected (`docs/jdk-collections-status.md`) |
-| threads / JMM | `Concurrency/Events.v`, `Order.v`, `Executions.v`, `DRF.v`, `Examples.v` | abstract event interface; executions, po/so/sw/hb/rf, well-formedness (JLS 17.4.7), hb-consistency (17.4.5), data races, SC; **DRF lemma proved** (a well-formed hb-consistent race-free execution is SC, `DRF.drf_execution_sc`), **DRF-SC for hb + acyclic(po∪so∪rf)** (`DRF.drf_sc_no_thin_air`), and the JLS 17.4.8 example proving the hb model alone is *not* DRF-SC (`Examples.hb_model_not_drf_sc`). Not yet connected to `Machine.v` (design in `docs/track-c-status.md`); the 17.4.8 commit model is next |
-| reflection, class loaders, natives beyond the list above | | not started |
+| threads in the machine | `Core/Threads.v`, `harness/threads/src` (model classes) | **done (sequentially consistent semantics)**: per-thread frames and monitor counts over the shared heap; blocking monitors (`monitorenter`, ACC_SYNCHRONIZED methods with exit on normal and abrupt return); `wait`/`notify`/`notifyAll` with wait sets and reentrant counts; interrupts (JLS 17.2.3: wait, sleep, join throw InterruptedException, the status is cleared); `Thread.start/join/isAlive/currentThread/sleep/yield/interrupt/interrupted` through a clean-room `java.lang.Thread` model class; class initialisation across threads (JLS 12.4.2: a thread blocks while another initialises the class). `tstep` is the step relation over every schedule, notify choice and spurious wakeup; `trun` an executable run for a scheduler. Clean-room models over it: `AtomicInteger/Long/Boolean/Reference`, `CountDownLatch`, `ReentrantLock` with `Condition`, `ThreadLocal` |
+| Java memory model | `Concurrency/Events.v`, `Order.v`, `Executions.v`, `DRF.v`, `Examples.v` | abstract event interface; executions, po/so/sw/hb/rf, well-formedness (JLS 17.4.7), hb-consistency (17.4.5), data races, SC; **DRF lemma proved** (`DRF.drf_execution_sc`), **DRF-SC for hb + acyclic(po∪so∪rf)** (`DRF.drf_sc_no_thin_air`), the JLS 17.4.8 example (`Examples.hb_model_not_drf_sc`). The thread layer is the SC semantics: by DRF-SC it has all the behaviours of race-free programs; the non-SC behaviours of racy programs are not generated (the link of `tstep` to `Executions.v` is not formalised yet) |
+| reflection | `Jdk/Jdk.v` (`class_model`) | `Object.getClass` and `java.lang.Class`: getName, getSimpleName (InnerClasses), getTypeName, isArray, isInterface, isPrimitive, isEnum, getSuperclass, getComponentType (incl. primitive classes), isInstance, isAssignableFrom, cast, desiredAssertionStatus (assertions off), toString, equals, `Class.forName(String)` (initialises the class when that needs no `<clinit>` code; otherwise STUCK). Not modelled: Method/Field/Constructor reflection, annotations, `getModifiers` |
+| class loaders, other natives | | not started (a run that needs them is STUCK) |
 
 Opcodes: **199 of 202** have semantics (`jsr`, `ret`, `jsr_w` are decoded and rejected: class files of version >= 51
-cannot contain them). Partial: `ldc` of MethodType/MethodHandle/dynamic constants, `invokedynamic` other than
-string concatenation and `LambdaMetafactory.metafactory` (no `Foo::new`, records' `ObjectMethods`, switch patterns).
+cannot contain them). Partial: `ldc` of MethodType/MethodHandle/dynamic constants, `invokedynamic` bootstraps other
+than StringConcatFactory, LambdaMetafactory (metafactory/altMetafactory), ObjectMethods and SwitchBootstraps (and
+the conversions listed under "Not done yet").
 **189** of the 199 occur in the differentially tested bytecode.
 
 Model bounds (a run that hits one is `STUCK`, i.e. no claim): arrays larger than 2^20 elements (OutOfMemoryError
@@ -41,6 +44,12 @@ a user object in string concatenation), identity hash codes.
 | `Strs` (String/StringBuilder/Character/parse/concat/switch/enum) | 53 | 10,000 | 0 (2 methods: sizes above the bound STUCK) |
 | `Flt` (float/double opcodes) | 31 | 10,000 | 0 |
 | `Lam` (lambdas, method refs, boxing caches, multianewarray, EIIE/NCDFE, enum switch) | 15 | 10,000 | 0 (1 method: sizes above the bound STUCK) |
+| `Fld` (corpus6: inherited/shadowed static and instance fields, interface fields, init order incl. superinterfaces with defaults, circular and erroneous initialisation, inherited static methods, enum with `name`/`ordinal` fields) | 11 | 2,000 | 0 |
+| `Sel` (corpus7: private methods incl. nestmates and private interface methods, maximally-specific defaults, package-private overriding across packages incl. JVMS 5.4.5 (b), super calls; classes recompiled separately: ICCE / AME / NoSuchMethodError / NoSuchFieldError, resolution before the null check) | 8 | 2,000 | 0 (172 of 2,000 inputs of `changed`/`changedCaught` are `STUCK` by design: the JVMS/HotSpot divergence below) |
+| `Indy` (corpus8, `--release 21`: `Foo::new` incl. initialisation and failing `<clinit>`, altMetafactory serializable/marker lambdas, record toString/equals/hashCode incl. float/double, NaN, -0.0, nulls and boxes, typeSwitch with Class/String/Integer labels and record patterns, sealed switch, enumSwitch) | 14 | 2,000 | 0 |
+| `Boxes` (corpus10: instanceof / checkcast / aastore of boxes, String, StringBuilder, enums into Serializable[] / Comparable[] / Constable[] / ConstantDesc[] / CharSequence[] / Number[], mixed varargs) | 4 | 2,000 | 0 |
+| `Msg` (corpus9: messages of ArithmeticException, ArrayIndexOutOfBounds, NegativeArraySize incl. multianewarray, ArrayStore, NoClassDefFoundError chains, ExceptionInInitializerError; uncaught and through getMessage()) | 11 | 2,000 | 0 (9,730 messages compared; the no-claims are the 2^20 array bound and Object.notify's message) |
+| all machine corpora above + `Heap`, `Strs`, `Lam`, `Flt`, cim hash, jdkmodel rerun with messages | 187 | 300 | 0 (1,345 messages compared) |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
 | java.util model classes (`targets-jdkmodel.txt`: HashMap, LinkedHashMap, tree bins, copies, ctors, sizing, strings, views, sets, ArrayList, AbstractList, AbstractMap, Collections) | 13 (+1 STUCK by design: identity-hash tie-break) | 10,000 | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
@@ -126,6 +135,62 @@ and `session_ok` starts from an invariant with `cap <= INT_MAX`. Sequence length
 enumeration bound, but the stated layer-counter bound and heap/environment preconditions remain.
 These theorems do not claim that arbitrary JVM allocations are supported.
 
+## Field and method resolution, selection, class initialisation (JVMS 5.4.3, 5.4.5, 5.4.6, 5.5)
+- **Fields** (`Machine.resolve_field`, 5.4.3.2): the referenced class, its superinterfaces, then its superclass, over
+  loaded classes and the generated JDK table `Core/JdkTables.v` (declared members of Object, Enum, Record, Throwable
+  and the exception classes, Number, the java.lang marker/functional interfaces, java.util.function; regenerate with
+  `tools/gen_jdk_tables.sh`). getstatic/putstatic initialise the class that *declares* the field (an inherited static
+  field no longer initialises the referenced class, an erroneous subclass does not hide its superclass's fields).
+  NoSuchFieldError / IncompatibleClassChangeError (static vs instance) are thrown, also before the null check of getfield/putfield.
+- **Shadowed instance fields**: an object stores its fields most-derived first; a field shadowed by a subclass field of
+  the same name is keyed `"<DeclaringClass>.<name>"`, every other field keeps its plain name (`instance_fields`).
+  getfield/putfield resolve the field only when the object holds a shadowed field of that name (`field_slot`), so the
+  keys and lookups of all existing proofs are unchanged. The Enum model reads `java/lang/Enum.name`/`ordinal` the same way
+  (an enum may declare its own `name`/`ordinal` fields).
+- **Methods**: `resolve_method` (5.4.3.3 / 5.4.3.4, incl. ICCE for class/interface mismatch, NoSuchMethodError,
+  maximally-specific superinterface methods), `select_virtual` (5.4.6: a private resolved method is selected as is,
+  overriding per 5.4.5 incl. package-private methods across packages and the transitive case, maximally-specific
+  defaults, AbstractMethodError / ICCE / IllegalAccessError), `select_special` (invokespecial: super calls start at the
+  direct superclass of the current class; `I.super.m()`). invokestatic initialises the declaring class.
+  `resolve_full p c n d` is the fast path the step lemmas use: the method an object of class `c` runs when that does
+  not depend on the resolved method (no private declaration of `n d` in the hierarchy other than the only one, no
+  package-private overriding question, not abstract, unique non-abstract maximally-specific default); otherwise the
+  machine asks the JDK model and then performs full resolution and selection.
+- **Initialisation order** (5.5 steps 6, 7): all not-yet-started classes of the superclass chain are marked and their
+  ConstantValue fields set before any `<clinit>` runs (circular initialisation sees the subclass "in progress"), then
+  `<clinit>`s run outermost first; before a class's `<clinit>` its superinterfaces that declare a non-abstract,
+  non-static method are initialised in JVMS order (a pending `<clinit>` frame at pc -1); an exception through a pending
+  frame marks that class erroneous.
+
+## invokedynamic (JDK 21 bootstrap methods)
+- `LambdaMetafactory.metafactory` and `altMetafactory` (flags serializable / markers / bridges: the lambda object also
+  implements the marker interfaces and java.io.Serializable; bridges are further descriptors of the same name),
+  implementation kinds static / virtual / interface / special and **REF_newInvokeSpecial** (`Foo::new`: initialises
+  Foo when the handle is invoked, allocates, runs the constructor, returns the object); arguments are unboxed to the
+  implementation's primitive parameters (null: NullPointerException).
+- `ObjectMethods.bootstrap` (records): `toString` = `getSimpleName()` (InnerClasses inner name, else the name after the
+  last '/') + `[a=..., b=...]` with String.valueOf of each component (primitives, null, Strings, boxes), `hashCode` =
+  fold `31 * h + hash(c)` (Integer/Long/.../Float/Double/Boolean.hashCode, Objects.hashCode), `equals` = same object,
+  else `isInstance` and the components compared last to first (Float/Double.compare == 0, Objects.equals) — the
+  structure of JDK 21's `ObjectMethods`.
+- `SwitchBootstraps.typeSwitch` / `enumSwitch` as implemented in JDK 21.0.12 (`createMethodHandleSwitch`):
+  `Objects.checkIndex(restart, n + 1)`, null -> -1, then the first label from `restart` that matches: Class
+  (`isInstance`), Integer (Number/Character value), String (`Objects.equals`), enum constant name (same declaring
+  enum class and the constant itself); none -> n.
+- The JDK classes not loaded by the machine now know their JDK 21 superinterfaces (boxes, Number, String,
+  StringBuilder, Class, Enum, the JdkTables.v classes): e.g. an Integer is Serializable / Comparable / Constable /
+  ConstantDesc, so `Serializable[]` from mixed varargs accepts it (was a wrong ArrayStoreException).
+
+## Exception messages (HotSpot 21 texts)
+The machine's own exceptions carry `detailMessage` (read by the Throwable.getMessage model, printed by the harness):
+`/ by zero` (idiv/irem/ldiv/lrem), `Index i out of bounds for length n` (all xaload/xastore),
+the negative count for NegativeArraySizeException (multianewarray: the first negative count met by HotSpot's
+depth-first allocation), `Class.getName()` of the stored value for ArrayStoreException, `current thread is not
+owner` (monitorexit), `Could not initialize class X` for NoClassDefFoundError (X = the first erroneous class of
+the superclass chain; the classes below it become erroneous, JVMS 5.5 step 7), null for ExceptionInInitializerError.
+`DiffRunner` prints `E <class> m:<hex units>|m:null`; `compare.py` compares the message when the model prints one
+and counts it (`messages_compared`).
+
 ## Proof infrastructure
 
 ### New bug witnesses (2026-10-24)
@@ -149,6 +214,10 @@ match their class files. The full available project, including the registered ne
 
 ### Infrastructure
 - `Core/Tactics.v`: symbolic execution of the frame interpreter (`symex`), used for int-only methods.
+- `Core/Logic.v` (statement change, 2026-10-24): `mstep_getfield` / `mstep_putfield` now take `obj_get p fr fs = Some v` /
+  `obj_set p fr v fs = Some fs'` instead of `assoc (fr_name fr) fs` / `set_assoc (fr_name fr) v fs` (with shadowed fields
+  the plain-name lookup is wrong for a field of the superclass; for an object without shadowed fields both reduce to the
+  old lookup by computation, so every call site `... | reflexivity | ...` is unchanged).
 - `Core/Logic.v`: run segments (`leads`, `returns`, `returns_weaken`), fuel composition, and step lemmas
   (`mstep_local`, `mstep_local_return`, `mstep_invoke`, `do_invoke_static_model`, `do_invoke_string_model`,
   getfield/putfield/getstatic/aaload/aastore/new/anewarray/ldc-String, invokespecial/virtual/static entry,
@@ -157,7 +226,7 @@ match their class files. The full available project, including the registered ne
   exhausts memory). `CimHash.v` shows the pattern: precomputed facts about the loaded program by `vm_compute`,
   model calls as lemmas proved with `cbv`, one tactic per instruction kind, loop proofs by induction.
 
-## Model bugs found tonight (fixed on branch `model-gaps` in /home/claude/rocq-jvm-gaps, commit b6f22ca, not merged yet)
+## Model bugs found on 2026-10-23/24 (fixed in the `model-gaps` work, merged 2026-10-25)
 - Instance fields are keyed by name only: a subclass field shadowing a superclass field of the same name collides
   (CaseInsensitiveMap.values vs AbstractMap.values). Not reached by any proof or test so far.
 - invokevirtual of a private method selects from the receiver's runtime class (JVMS 5.4.6: the resolved private method
@@ -168,8 +237,21 @@ The camel-wal and CaseInsensitiveMap proofs do not depend on these cases (no sha
 calls are on receivers of the declaring class, no boxed values are stored into typed arrays).
 
 ## Not done yet / known limitations
-- `jsr`/`ret` (not needed), dynamic constants, `Foo::new`, `altMetafactory`, switch-pattern and record bootstraps.
-- Interface default-method selection takes the first default found (JVMS "maximally specific" not checked).
-- Static fields inherited from a superclass (getstatic resolution through superclasses) are `STUCK`.
-- Exception objects carry no message/cause/stack trace (only the class is observable in the model).
+- `jsr`/`ret` (not needed), dynamic constants (condy; e.g. `EnumDesc` labels of a pattern switch over a sealed type
+  with qualified enum constants are `STUCK`).
+- invokedynamic: lambdas whose implementation needs boxing, widening or a return-value conversion/drop (e.g.
+  `Supplier<Integer> s = this::intMethod`) are `STUCK` (unboxing of arguments is modelled); record `toString` of
+  float/double components (Float/Double.toString) and of components that need `toString()`/`hashCode()`/`equals()`
+  of another object (a call back into bytecode) are `STUCK`; so are pattern-switch label tests that would call `equals()`.
+- invokeinterface where several maximally-specific default methods match: JVMS 6.5 says
+  IncompatibleClassChangeError, HotSpot 21 throws AbstractMethodError (corpus7 `changed`, case 1): `STUCK` (no claim).
+- Access control (IllegalAccessError for private/protected/package access, putstatic to a final field outside
+  `<clinit>`) and loader constraints are not checked: javac never emits such accesses in a jointly compiled program.
+- Fast paths assume a link-consistent class set (see "Field and method resolution" below and TRUST.md).
+- Exception messages: only the exceptions the machine itself creates carry one (below); exceptions made by JDK models
+  (`MThrow`, e.g. NumberFormatException, Object.notify's IllegalMonitorStateException) and by user code
+  (`new RuntimeException("x")`) have no modelled message (getMessage() on them is `STUCK`, the harness compares
+  only their class). Helpful NullPointerException messages, ClassCastException messages (they name class loaders,
+  with identity hash codes under the harness's URLClassLoader) and the linkage errors' messages are not modelled.
+  No causes or stack traces.
 - Threads: Track C. Reflection, class loaders: later phases.

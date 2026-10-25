@@ -2,6 +2,7 @@
     frames are concrete and whose heap is a chain of updates of a variable heap. *)
 From Stdlib Require Import ZArith String List Bool Lia.
 From JVM.Core Require Import Int Instr Desc Semantics Machine Logic.
+From JVM.Camel Require Import CimProg CimCalls.
 
 Ltac use_hyps :=
   repeat match goal with
@@ -25,11 +26,21 @@ Ltac hp := cbn [ms_heap ms_statics ms_inited];
   repeat first [ rewrite upd_same | rewrite upd_other by neq ];
   first [ eassumption | reflexivity ].
 
+(** The value of a field: on a CaseInsensitiveMap object through [cim_get] / a [cim_reads]
+    hypothesis, otherwise by computation or a hypothesis. *)
+Ltac fget := first
+  [ (rewrite cim_get by (apply cim_in; reflexivity); cbn [fr_name]; reflexivity)
+  | (match goal with H : cim_reads ?fs |- obj_get _ _ ?fs = _ =>
+       rewrite H by (apply cim_in; reflexivity); cbn [fr_name]; first [ reflexivity | eassumption ] end)
+  | eassumption | reflexivity ].
+Ltac fset := first
+  [ (rewrite cim_set by (apply cim_in; reflexivity); cbn [fr_name]; reflexivity)
+  | reflexivity ].
 Ltac GET := eapply returns_step;
-  [ eapply mstep_getfield; [ reflexivity | reflexivity | reflexivity | hp | first [ reflexivity | eassumption ] | reflexivity ] | try nz ].
+  [ eapply mstep_getfield; [ reflexivity | reflexivity | reflexivity | hp | fget | reflexivity ] | try nz ].
 Ltac PUT := eapply returns_step;
   [ eapply mstep_putfield; [ reflexivity | reflexivity | reflexivity | reflexivity | reflexivity | hp
-                           | reflexivity | reflexivity ] | try nz ].
+                           | fset | reflexivity ] | try nz ].
 Ltac RET := eapply returns_step;
   [ eapply mstep_return_to; [ reflexivity | reflexivity | reflexivity | reflexivity | cbn; reflexivity | reflexivity ]
   | try nz ].

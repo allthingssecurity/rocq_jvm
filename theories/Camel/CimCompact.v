@@ -94,7 +94,7 @@ Section Compact.
 Variable e : jenv.
 
 Lemma c1_loop : forall f h nx sts ini lk c rs m niA fs0 kA ks u ni i cnt r v P,
-  h m = Some (OObj CIM fs0) -> assoc "keys" fs0 = Some (VRef kA) -> assoc "usedSlots" fs0 = Some (VInt u) ->
+  h m = Some (OObj CIM fs0) -> cim_reads fs0 -> assoc "keys" fs0 = Some (VRef kA) -> assoc "usedSlots" fs0 = Some (VInt u) ->
   h kA = Some (OArr (TRef STR) ks) -> h niA = Some (OArr TInt ni) -> niA <> m -> niA <> kA ->
   Z.to_nat (u - i) = f -> 0 <= i <= u -> u <= MAX_ARRAY -> 0 <= cnt <= i ->
   c1 ks i f cnt ni = Some r ->
@@ -107,7 +107,7 @@ Lemma c1_loop : forall f h nx sts ini lk c rs m niA fs0 kA ks u ni i cnt r v P,
                       (mkframe 11 nil [VRef m; VRef niA; VInt cnt; VInt i; VTop; VTop]) :: c :: rs |} v P.
 Proof.
   induction f as [|f IH]; intros h nx sts ini lk c rs m niA fs0 kA ks u ni i cnt r v P
-    Hm Hk Hu HkA Hni Hnm Hnk Hf Hi Hmax Hc Hr HK.
+    Hm Hrd Hk Hu HkA Hni Hnm Hnk Hf Hi Hmax Hc Hr HK.
   - (* exit *)
     assert (i = u) by lia. subst i. cbn in Hr. injection Hr as <-.
     assert (E : (u <=? u) = true) by (apply Z.leb_le; lia).
@@ -148,7 +148,7 @@ Qed.
 
 
 Lemma c2_loop : forall f h nx sts ini lk c rs m niA fs0 tA tbl ni n' T b r v P,
-  h m = Some (OObj CIM fs0) -> assoc "table" fs0 = Some (VRef tA) ->
+  h m = Some (OObj CIM fs0) -> cim_reads fs0 -> assoc "table" fs0 = Some (VRef tA) ->
   h tA = Some (OArr TInt tbl) -> h niA = Some (OArr TInt ni) -> niA <> m -> tA <> m -> tA <> niA ->
   Z.of_nat (length tbl) = T -> Z.to_nat (T - b) = f -> 0 <= b <= T -> T <= MAX_ARRAY ->
   c2 ni tbl b f = Some r ->
@@ -161,7 +161,7 @@ Lemma c2_loop : forall f h nx sts ini lk c rs m niA fs0 tA tbl ni n' T b r v P,
                       (mkframe 43 nil [VRef m; VRef niA; VInt n'; VInt b; VTop; VTop]) :: c :: rs |} v P.
 Proof.
   induction f as [|f IH]; intros h nx sts ini lk c rs m niA fs0 tA tbl ni n' T b r v P
-    Hm Ht HtA Hni Hnm Htm Htn HT Hf Hb Hmax Hr HK.
+    Hm Hrd Ht HtA Hni Hnm Htm Htn HT Hf Hb Hmax Hr HK.
   - assert (b = T) by lia. subst b. cbn in Hr. injection Hr as <-.
     assert (E : (Z.of_nat (length tbl) <=? Z.of_nat (length tbl)) = true) by (apply Z.leb_le; lia).
     subst T. lstep. lstep. GET. ALEN. lstep.
@@ -195,6 +195,7 @@ Proof.
       apply (IH (upd h tA (OArr TInt (set_nth_z tbl b (VInt y)))) nx sts ini lk c rs m niA fs0 tA
                 (set_nth_z tbl b (VInt y)) ni n' T (b + 1) r v P).
       * rewrite upd_other by congruence. exact Hm.
+      * exact Hrd.
       * exact Ht.
       * apply upd_same.
       * rewrite upd_other by congruence. exact Hni.
@@ -211,7 +212,7 @@ Qed.
 
 
 Lemma c3_loop : forall f hc h0 nx sts ini lk c rs m niA tA fs0 kA vA cA ni ks vs cn u n' i x4 x5 ks' vs' cn' v P,
-  hc m = Some (OObj CIM fs0) -> assoc "keys" fs0 = Some (VRef kA) -> assoc "values" fs0 = Some (VRef vA) ->
+  hc m = Some (OObj CIM fs0) -> cim_reads fs0 -> assoc "keys" fs0 = Some (VRef kA) -> assoc "values" fs0 = Some (VRef vA) ->
   assoc "chainNext" fs0 = Some (VRef cA) -> assoc "usedSlots" fs0 = Some (VInt u) ->
   hc kA = Some (OArr (TRef STR) ks) -> hc vA = Some (OArr (TRef OBJ) vs) -> hc cA = Some (OArr TInt cn) ->
   hc niA = Some (OArr TInt ni) -> niA <> cA -> m <> niA -> m <> kA -> m <> vA -> m <> cA ->
@@ -232,7 +233,7 @@ Lemma c3_loop : forall f hc h0 nx sts ini lk c rs m niA tA fs0 kA vA cA ni ks vs
                       (mkframe 84 nil [VRef m; VRef niA; VInt n'; VInt i; x4; x5]) :: c :: rs |} v P.
 Proof.
   induction f as [|f IH]; intros hc h0 nx sts ini lk c rs m niA tA fs0 kA vA cA ni ks vs cn u n' i x4 x5 ks' vs' cn' v P
-    Hm Hk Hv Hc Hu HkA HvA HcA Hni Hnc Hmn Hmk Hmv Hmc Hagr Hf Hi Hmax Hx4 Hx5 Hr HK.
+    Hm Hrd Hk Hv Hc Hu HkA HvA HcA Hni Hnc Hmn Hmk Hmv Hmc Hagr Hf Hi Hmax Hx4 Hx5 Hr HK.
   - assert (i = u) by lia. subst i. cbn in Hr. injection Hr as <- <- <-.
     assert (E : (u <=? u) = true) by (apply Z.leb_le; lia).
     lstep. lstep. GET. lstep.
@@ -322,7 +323,7 @@ Proof.
            nz. lstep. lstep.
            apply (IH _ h0 nx sts ini lk c rs m niA tA fs0 kA vA cA ni (set_nth_z ks j (VRef kl)) (set_nth_z vs j VNull)
                      (set_nth_z cn j (VInt (-1))) u n' (i + 1) (VInt j) (VInt nxi) ks' vs' cn' v P);
-             [ hfact | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
+             [ hfact | exact Hrd | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
              | exact Hnc | exact Hmn | exact Hmk | exact Hmv | exact Hmc
              | intros y0 H1 H2 H3 H4 H5; repeat rewrite upd_other by congruence; apply Hagr; assumption
              | clear -Hf; lia | clear -Hi Hlt; lia | exact Hmax | reflexivity | reflexivity | exact Hr
@@ -339,7 +340,7 @@ Proof.
            nz. lstep. lstep.
            apply (IH _ h0 nx sts ini lk c rs m niA tA fs0 kA vA cA ni (set_nth_z ks j (VRef kl)) (set_nth_z vs j (VRef vl))
                      (set_nth_z cn j (VInt (-1))) u n' (i + 1) (VInt j) (VInt nxi) ks' vs' cn' v P);
-             [ hfact | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
+             [ hfact | exact Hrd | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
              | exact Hnc | exact Hmn | exact Hmk | exact Hmv | exact Hmc
              | intros y0 H1 H2 H3 H4 H5; repeat rewrite upd_other by congruence; apply Hagr; assumption
              | clear -Hf; lia | clear -Hi Hlt; lia | exact Hmax | reflexivity | reflexivity | exact Hr
@@ -376,7 +377,7 @@ Proof.
            nz. lstep. lstep.
            apply (IH _ h0 nx sts ini lk c rs m niA tA fs0 kA vA cA ni (set_nth_z ks j (VRef kl)) (set_nth_z vs j VNull)
                      (set_nth_z cn j (VInt y')) u n' (i + 1) (VInt j) (VInt nxi) ks' vs' cn' v P);
-             [ hfact | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
+             [ hfact | exact Hrd | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
              | exact Hnc | exact Hmn | exact Hmk | exact Hmv | exact Hmc
              | intros y0 H1 H2 H3 H4 H5; repeat rewrite upd_other by congruence; apply Hagr; assumption
              | clear -Hf; lia | clear -Hi Hlt; lia | exact Hmax | reflexivity | reflexivity | exact Hr
@@ -393,7 +394,7 @@ Proof.
            nz. lstep. lstep.
            apply (IH _ h0 nx sts ini lk c rs m niA tA fs0 kA vA cA ni (set_nth_z ks j (VRef kl)) (set_nth_z vs j (VRef vl))
                      (set_nth_z cn j (VInt y')) u n' (i + 1) (VInt j) (VInt nxi) ks' vs' cn' v P);
-             [ hfact | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
+             [ hfact | exact Hrd | exact Hk | exact Hv | exact Hc | exact Hu | hfact | hfact | hfact | hfact
              | exact Hnc | exact Hmn | exact Hmk | exact Hmv | exact Hmc
              | intros y0 H1 H2 H3 H4 H5; repeat rewrite upd_other by congruence; apply Hagr; assumption
              | clear -Hf; lia | clear -Hi Hlt; lia | exact Hmax | reflexivity | reflexivity | exact Hr
@@ -472,20 +473,20 @@ Proof.
   nz. lstep. lstep. lstep. lstep. lstep.
   eapply (c1_loop (Z.to_nat (u - 0)) (upd h nx (OArr TInt (repeat (VInt 0) (Z.to_nat u)))) (nx + 1) sts ini lk c rest m nx
             (cim_fields tA kA vA cA sz u thr af) kA ks u (repeat (VInt 0) (Z.to_nat u)) 0 0 (n', ni) v P);
-    [ hfact | reflexivity | reflexivity | hfact | apply upd_same | exact Hxm | exact Hxk | reflexivity | lia | lia | lia
+    [ hfact | apply cim_fields_reads | reflexivity | reflexivity | hfact | apply upd_same | exact Hxm | exact Hxk | reflexivity | lia | lia | lia
     | replace (u - 0) with u by lia; exact Hc1 | ].
   cbn [fst snd]. intros h1 H1a H1b.
   lstep. lstep.
   eapply (c2_loop (Z.to_nat (Z.of_nat (length tbl) - 0)) h1 (nx + 1) sts ini lk c rest m nx
             (cim_fields tA kA vA cA sz u thr af) tA tbl ni n' (Z.of_nat (length tbl)) 0 tbl' v P);
-    [ rewrite H1b by congruence; hfact | reflexivity | rewrite H1b by congruence; hfact | exact H1a
+    [ rewrite H1b by congruence; hfact | apply cim_fields_reads | reflexivity | rewrite H1b by congruence; hfact | exact H1a
     | exact Hxm | apply not_eq_sym; exact Hmt | apply not_eq_sym; exact Hxt | reflexivity | reflexivity | lia | exact HT
     | replace (Z.of_nat (length tbl) - 0) with (Z.of_nat (length tbl)) by lia; exact Hc2 | ].
   intros h2 H2a H2b.
   lstep. lstep.
   eapply (c3_loop (Z.to_nat (u - 0)) h2 h (nx + 1) sts ini lk c rest m nx tA (cim_fields tA kA vA cA sz u thr af)
             kA vA cA ni ks vs cn u n' 0 VTop VTop ks' vs' cn' v P);
-    [ rewrite H2b, H1b by congruence; hfact | reflexivity | reflexivity | reflexivity | reflexivity
+    [ rewrite H2b, H1b by congruence; hfact | apply cim_fields_reads | reflexivity | reflexivity | reflexivity | reflexivity
     | rewrite H2b, H1b by congruence; hfact | rewrite H2b, H1b by congruence; hfact | rewrite H2b, H1b by congruence; hfact
     | rewrite H2b by congruence; exact H1a | congruence | congruence | congruence | congruence | congruence
     | intros y Y1 Y2 Y3 Y4 Y5; rewrite H2b, H1b by congruence; apply upd_other; congruence

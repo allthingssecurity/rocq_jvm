@@ -1,0 +1,11 @@
+classes/corpus6 org.rocqjvm.corpus6.Fld inheritedGet (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld inheritedPut (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld ifaceField (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld inheritedStaticCall (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld defaultsInit (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld circular (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld erroneous (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld erroneousIface (I)J fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld uncaughtInit (I)I fresh
+classes/corpus6 org.rocqjvm.corpus6.Fld shadow (I)J
+classes/corpus6 org.rocqjvm.corpus6.Fld enumFields (I)I

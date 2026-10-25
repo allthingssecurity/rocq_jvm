@@ -233,6 +233,58 @@ Proof. intros A l i x H. apply nth_z_bounds in H. apply orb_false_iff. split; [a
 
 Definition STR := "java/lang/String"%string.
 
+(** ** Field access on CaseInsensitiveMap objects.
+    The object stores its own fields under their plain names and AbstractMap's [keySet] and
+    (shadowed) [values] after them; the shadowed one is keyed "java/util/AbstractMap.values"
+    (Machine.instance_fields). A getfield/putfield of one of the seven fields of the class goes
+    to the plain key ([Machine.field_slot] resolves the reference for "values"). *)
+Definition cim_fields (tA kA vA cA sz u thr : Z) (af : value * value) : list (string * value) :=
+  [("table", VRef tA); ("keys", VRef kA); ("values", VRef vA); ("chainNext", VRef cA);
+   ("size", VInt sz); ("usedSlots", VInt u); ("threshold", VInt thr);
+   ("keySet", fst af); ("java/util/AbstractMap.values", snd af)].
+
+Definition fr_of (n d : string) : fieldref := {| fr_class := CIM; fr_name := n; fr_desc := d |}.
+Definition cim_frs : list fieldref :=
+  [fr_of "table" "[I"; fr_of "keys" "[Ljava/lang/String;"; fr_of "values" "[Ljava/lang/Object;";
+   fr_of "chainNext" "[I"; fr_of "size" "I"; fr_of "usedSlots" "I"; fr_of "threshold" "I"].
+
+Definition fr_eqb (a b : fieldref) : bool :=
+  String.eqb (fr_class a) (fr_class b) && String.eqb (fr_name a) (fr_name b) && String.eqb (fr_desc a) (fr_desc b).
+
+Lemma cim_in : forall fr, existsb (fr_eqb fr) cim_frs = true -> In fr cim_frs.
+Proof.
+  intros fr H. apply existsb_exists in H as (x & Hx & E). unfold fr_eqb in E.
+  apply andb_true_iff in E as (E & E3). apply andb_true_iff in E as (E1 & E2).
+  apply String.eqb_eq in E1, E2, E3. destruct fr, x; cbn in *; subst; exact Hx.
+Qed.
+
+(** The fields of an object reached through a CaseInsensitiveMap field reference. *)
+Definition cim_reads (fs : list (string * value)) : Prop :=
+  forall fr, In fr cim_frs -> obj_get cp fr fs = assoc (fr_name fr) fs.
+
+Lemma res_values : resolve_field cp (fr_of "values" "[Ljava/lang/Object;") = FFound CIM 130.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma cim_slot : forall tA kA vA cA sz u thr af fr, In fr cim_frs ->
+  field_slot cp fr (cim_fields tA kA vA cA sz u thr af) = FSKey (fr_name fr).
+Proof.
+  intros tA kA vA cA sz u thr af fr Hin.
+  cbn [cim_frs In] in Hin. repeat destruct Hin as [<-|Hin]; try destruct Hin.
+  all: vm_compute; reflexivity.
+Qed.
+
+Lemma cim_fields_reads : forall tA kA vA cA sz u thr af, cim_reads (cim_fields tA kA vA cA sz u thr af).
+Proof. intros tA kA vA cA sz u thr af fr Hin. unfold obj_get. rewrite cim_slot by exact Hin. reflexivity. Qed.
+
+Lemma cim_get : forall tA kA vA cA sz u thr af fr, In fr cim_frs ->
+  obj_get cp fr (cim_fields tA kA vA cA sz u thr af) = assoc (fr_name fr) (cim_fields tA kA vA cA sz u thr af).
+Proof. intros. apply cim_fields_reads. assumption. Qed.
+
+Lemma cim_set : forall tA kA vA cA sz u thr af fr w, In fr cim_frs ->
+  obj_set cp fr w (cim_fields tA kA vA cA sz u thr af) = set_assoc (fr_name fr) w (cim_fields tA kA vA cA sz u thr af).
+Proof. intros. unfold obj_set. rewrite cim_slot by assumption. reflexivity. Qed.
+
+
 (** What findIndex computes: walk the chain from [i], return the first slot whose key
     equalsIgnoreCase [q], or -1. [None] if the walk is longer than the fuel or meets a
     malformed slot (then the lemma below says nothing). *)
@@ -268,7 +320,12 @@ Ltac nrm ::= rewrite ?hs_local, ?hs_model, ?fs_local, ?fs_model.
 
 Ltac hp := cbn [ms_heap fs hs with_frames]; eassumption.
 Ltac GET := eapply returns_step;
-  [ eapply mstep_getfield; [ reflexivity | reflexivity | reflexivity | hp | eassumption | reflexivity ] | nrm ].
+  [ eapply mstep_getfield; [ reflexivity | reflexivity | reflexivity | hp
+                           | first [ eassumption
+                                   | (match goal with H : cim_reads ?fs |- obj_get _ _ ?fs = _ =>
+                                        rewrite H by (apply cim_in; reflexivity); cbn [fr_name]; eassumption end)
+                                   | reflexivity ]
+                           | reflexivity ] | nrm ].
 
 (** The continuation after a callee returns int [v] to caller [c]. *)
 Definition iret (s : mstate) (c : cframe) (rs : list cframe) (v : Z) : mstate :=
@@ -276,7 +333,7 @@ Definition iret (s : mstate) (c : cframe) (rs : list cframe) (v : Z) : mstate :=
                                                (VInt v :: f_stack (cf_frame c)) (f_locals (cf_frame c)))) None :: rs).
 
 Lemma fi_loop : forall f s c rs nx m q qu hsh fs_ kA ks cA cn r v P,
-  ms_heap s m = Some (OObj CIM fs_) ->
+  ms_heap s m = Some (OObj CIM fs_) -> cim_reads fs_ ->
   assoc "keys" fs_ = Some (VRef kA) -> assoc "chainNext" fs_ = Some (VRef cA) ->
   ms_heap s kA = Some (OArr (TRef STR) ks) -> ms_heap s cA = Some (OArr TInt cn) ->
   ms_heap s q = Some (OStr qu) -> cf_resume c = Some nx ->
@@ -284,7 +341,7 @@ Lemma fi_loop : forall f s c rs nx m q qu hsh fs_ kA ks cA cn r v P,
   returns cp mdl (iret s c rs r) v P ->
   returns cp mdl (fs s (c :: rs) 15 [] [VRef m; VRef q; VInt hsh; VInt idx]) v P.
 Proof.
-  induction f as [|f IH]; intros s c rs nx m q qu hsh fs_ kA ks cA cn r v P Hm Hk Hc HkA HcA Hq Hr idx Hw HR;
+  induction f as [|f IH]; intros s c rs nx m q qu hsh fs_ kA ks cA cn r v P Hm Hnd Hk Hc HkA HcA Hq Hr idx Hw HR;
     [discriminate|].
   cbn [fi_walk] in Hw.
   destruct (Z.eqb_spec idx (-1)) as [E|E].
@@ -333,7 +390,7 @@ Lemma call_fi : forall s top rest nx m q qu hsh rst fs_ tA tbl kA ks cA cn pw i0
   ms_frames s = top :: rest ->
   fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Invoke InvVirtual fi_mr, nx) ->
   f_stack (cf_frame top) = VInt hsh :: VRef q :: VRef m :: rst ->
-  ms_heap s m = Some (OObj CIM fs_) ->
+  ms_heap s m = Some (OObj CIM fs_) -> cim_reads fs_ ->
   assoc "table" fs_ = Some (VRef tA) -> assoc "keys" fs_ = Some (VRef kA) -> assoc "chainNext" fs_ = Some (VRef cA) ->
   ms_heap s tA = Some (OArr TInt tbl) ->
   ms_heap s kA = Some (OArr (TRef STR) ks) -> ms_heap s cA = Some (OArr TInt cn) ->
@@ -344,7 +401,7 @@ Lemma call_fi : forall s top rest nx m q qu hsh rst fs_ tA tbl kA ks cA cn pw i0
   returns cp mdl (with_frames s (set_resume (set_frame top (mkframe nx (VInt r :: rst) (f_locals (cf_frame top)))) None :: rest)) v P ->
   returns cp mdl s v P.
 Proof.
-  intros s top rest nx m q qu hsh rst fs_ tA tbl kA ks cA cn pw i0 r v P Hfr Hf Hst Hm Ht Hk Hc HtA HkA HcA Hq Hlen Hpw Hb Hw HR.
+  intros s top rest nx m q qu hsh rst fs_ tA tbl kA ks cA cn pw i0 r v P Hfr Hf Hst Hm Hnd Ht Hk Hc HtA HkA HcA Hq Hlen Hpw Hb Hw HR.
   assert (Hp2 : 1 <= 2 ^ pw <= 2 ^ 30) by (split; [assert (0 < 2 ^ pw) by (apply Z.pow_pos_nonneg; lia); lia | apply Z.pow_le_mono_r; lia]).
   set (c := set_resume (set_frame top (mkframe (f_pc (cf_frame top)) rst (f_locals (cf_frame top)))) (Some nx)).
   eapply returns_step.
@@ -392,7 +449,7 @@ Ltac nrm ::= rewrite ?hs_local, ?hs_model, ?fs_local, ?fs_model, ?f1s_local, ?f1
 Ltac hp ::= cbn [ms_heap fs hs f1s with_frames]; eassumption.
 
 Lemma fi1_loop : forall f s c rs nx m q qu fs_ kA ks cA cn r v P,
-  ms_heap s m = Some (OObj CIM fs_) ->
+  ms_heap s m = Some (OObj CIM fs_) -> cim_reads fs_ ->
   assoc "keys" fs_ = Some (VRef kA) -> assoc "chainNext" fs_ = Some (VRef cA) ->
   ms_heap s kA = Some (OArr (TRef STR) ks) -> ms_heap s cA = Some (OArr TInt cn) ->
   ms_heap s q = Some (OStr qu) -> cf_resume c = Some nx ->
@@ -400,7 +457,7 @@ Lemma fi1_loop : forall f s c rs nx m q qu fs_ kA ks cA cn r v P,
   returns cp mdl (iret s c rs r) v P ->
   returns cp mdl (f1s s (c :: rs) 18 [] [VRef m; VRef q; VInt idx]) v P.
 Proof.
-  induction f as [|f IH]; intros s c rs nx m q qu fs_ kA ks cA cn r v P Hm Hk Hc HkA HcA Hq Hr idx Hw HR;
+  induction f as [|f IH]; intros s c rs nx m q qu fs_ kA ks cA cn r v P Hm Hnd Hk Hc HkA HcA Hq Hr idx Hw HR;
     [discriminate|].
   cbn [fi_walk] in Hw.
   destruct (Z.eqb_spec idx (-1)) as [E|E].
@@ -446,7 +503,7 @@ Lemma call_fi1 : forall s top rest nx m q qu rst fs_ tA tbl kA ks cA cn pw i0 r 
   ms_frames s = top :: rest ->
   fetch (c_instrs (cf_code top)) (f_pc (cf_frame top)) (c_length (cf_code top)) = Some (Invoke InvVirtual fi1_mr, nx) ->
   f_stack (cf_frame top) = VRef q :: VRef m :: rst ->
-  ms_heap s m = Some (OObj CIM fs_) ->
+  ms_heap s m = Some (OObj CIM fs_) -> cim_reads fs_ ->
   assoc "table" fs_ = Some (VRef tA) -> assoc "keys" fs_ = Some (VRef kA) -> assoc "chainNext" fs_ = Some (VRef cA) ->
   ms_heap s tA = Some (OArr TInt tbl) ->
   ms_heap s kA = Some (OArr (TRef STR) ks) -> ms_heap s cA = Some (OArr TInt cn) ->
@@ -458,7 +515,7 @@ Lemma call_fi1 : forall s top rest nx m q qu rst fs_ tA tbl kA ks cA cn pw i0 r 
   returns cp mdl (with_frames s (set_resume (set_frame top (mkframe nx (VInt r :: rst) (f_locals (cf_frame top)))) None :: rest)) v P ->
   returns cp mdl s v P.
 Proof.
-  intros s top rest nx m q qu rst fs_ tA tbl kA ks cA cn pw i0 r v P Hfr Hf Hst Hm Ht Hk Hc HtA HkA HcA Hq Hmax He Hi Hlen Hpw Hb Hw HR.
+  intros s top rest nx m q qu rst fs_ tA tbl kA ks cA cn pw i0 r v P Hfr Hf Hst Hm Hnd Ht Hk Hc HtA HkA HcA Hq Hmax He Hi Hlen Hpw Hb Hw HR.
   assert (Hp2 : 1 <= 2 ^ pw <= 2 ^ 30) by (split; [assert (0 < 2 ^ pw) by (apply Z.pow_pos_nonneg; lia); lia | apply Z.pow_le_mono_r; lia]).
   set (c := set_resume (set_frame top (mkframe (f_pc (cf_frame top)) rst (f_locals (cf_frame top)))) (Some nx)).
   eapply returns_step.
