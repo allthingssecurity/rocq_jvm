@@ -8,7 +8,28 @@
     arithmetic is trusted. *)
 
 From Stdlib Require Import ZArith String Ascii List.
-From Stdlib Require Extraction ExtrOcamlBasic ExtrOcamlNativeString.
+From Stdlib Require Extraction ExtrOcamlBasic ExtrOcamlNativeString ExtrOcamlZBigInt.
+(* Z, N and positive as zarith integers (ExtrOcamlZBigInt), and the bitwise, power, square root
+   and logarithm operations mapped to zarith too: the drivers are about 20-30 times faster and
+   need a fraction of the memory. These mappings are part of the test harness's trust base
+   (TRUST.md section 4), not of the proofs. *)
+Extract Constant Z.land => "Z.logand".
+Extract Constant Z.lor => "Z.logor".
+Extract Constant Z.lxor => "Z.logxor".
+Extract Constant Z.ldiff => "(fun x y -> Z.logand x (Z.lognot y))".
+Extract Constant Z.testbit => "(fun x n -> Z.sign n >= 0 && Z.testbit x (Z.to_int n))".
+Extract Constant Z.log2 => "(fun x -> if Z.sign x <= 0 then Z.zero else Z.of_int (Z.log2 x))".
+Extract Constant Z.pow => "(fun x y -> if Z.sign y < 0 then Z.zero else Z.pow x (Z.to_int y))".
+Extract Constant Z.sqrt => "(fun x -> if Z.sign x <= 0 then Z.zero else Z.sqrt x)".
+Extract Constant Z.leb => "Z.leq".
+Extract Constant Z.ltb => "Z.lt".
+Extract Constant Z.geb => "Z.geq".
+Extract Constant Z.gtb => "Z.gt".
+Extract Constant Z.even => "(fun x -> not (Z.testbit x 0))".
+Extract Constant Z.odd => "(fun x -> Z.testbit x 0)".
+Extract Constant Z.sgn => "(fun x -> Z.of_int (Z.sign x))".
+Extract Constant Z.quot => "(fun x y -> if Z.sign y = 0 then Z.zero else Z.div x y)".
+Extract Constant Z.rem => "(fun x y -> if Z.sign y = 0 then x else Z.rem x y)".
 From JVM.Core Require Import Int Instr Desc Semantics Float.
 From JVM.Loader Require Import ClassFile.
 From JVM.Core Require Import Machine Threads.

@@ -1,0 +1,2 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.DurationOps ops (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.DurationOps parse (I)Ljava/lang/String;

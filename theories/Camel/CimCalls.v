@@ -60,7 +60,14 @@ Proof. intros s l u H. unfold jdk_model. cbv -[slen ms_heap]. rewrite H. reflexi
 
 Lemma m_charAt : forall s l u i ch, ms_heap s l = Some (OStr u) -> nth_unit u i = Some ch ->
   jdk_model cp e "java/lang/String" "charAt" "(I)C" [VRef l; VInt i] s = MOk (Some (VInt ch)) s.
-Proof. intros s l u i ch H H0. unfold jdk_model. cbv -[nth_unit ms_heap]. rewrite H. cbv -[nth_unit]. rewrite H0. reflexivity. Qed.
+Proof.
+  intros s l u i ch H H0.
+  (* the String model alone (its charAt case), then the dispatch of jdk_model to it *)
+  assert (Hs : string_model e "charAt" "(I)C" [VRef l; VInt i] s = MOk (Some (VInt ch)) s).
+  { unfold string_model. cbv -[nth_unit ms_heap char_at sioobe_index]. rewrite H.
+    cbv -[nth_unit sioobe_index]. rewrite H0. reflexivity. }
+  unfold jdk_model. cbv -[string_model string_static object_model]. rewrite Hs. reflexivity.
+Qed.
 
 Lemma m_upper : forall s ch,
   jdk_model cp e "java/lang/Character" "toUpperCase" "(C)C" [VInt ch] s = MOk (Some (VInt (i2c (u_upper (j_u e) ch)))) s.
@@ -220,7 +227,13 @@ Qed.
 Lemma m_eic : forall s a b ua ub, ms_heap s a = Some (OStr ua) -> ms_heap s b = Some (OStr ub) ->
   jdk_model cp e "java/lang/String" "equalsIgnoreCase" "(Ljava/lang/String;)Z" [VRef a; VRef b] s
   = MOk (Some (VInt (if equals_ignore_case (j_u e) ua ub then 1 else 0))) s.
-Proof. intros s a b ua ub Ha Hb. unfold jdk_model. cbv -[equals_ignore_case ms_heap j_u]. rewrite Ha, Hb. reflexivity. Qed.
+Proof.
+  intros s a b ua ub Ha Hb.
+  assert (Hs : string_model e "equalsIgnoreCase" "(Ljava/lang/String;)Z" [VRef a; VRef b] s
+               = MOk (Some (VInt (if equals_ignore_case (j_u e) ua ub then 1 else 0))) s).
+  { unfold string_model. cbv -[equals_ignore_case ms_heap j_u]. rewrite Ha, Hb. reflexivity. }
+  unfold jdk_model. cbv -[string_model string_static object_model equals_ignore_case j_u]. rewrite Hs. reflexivity.
+Qed.
 
 Lemma nth_z_bounds : forall {A} (l : list A) i x, nth_z l i = Some x -> 0 <= i < Z.of_nat (length l).
 Proof.

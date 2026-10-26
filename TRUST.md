@@ -49,8 +49,11 @@ HotSpot on random inputs, and a mismatch is treated as a model bug.
 
 ## 4. Differential testing (evidence for 2 and 3, not part of the proof)
 - `harness/`: the model is extracted to OCaml (standard extraction of bool/option/list/pair and of
-  `string`/`ascii` to OCaml strings/chars; `Z`, `positive`, `nat` stay unary/binary, so no OCaml
-  machine arithmetic is involved) and run against HotSpot (`java` 21.0.12, `DiffRunner` via
+  `string`/`ascii` to OCaml strings/chars; `Z`, `positive` and `N` to zarith integers by the
+  standard library's `ExtrOcamlZBigInt`, plus `theories/Extract.v`'s mappings of `Z.land`, `lor`,
+  `lxor`, `ldiff`, `testbit`, `log2`, `pow`, `sqrt`, `leb`/`ltb`/`geb`/`gtb`, `even`/`odd`, `sgn`,
+  `quot`/`rem` to the zarith functions with the same meaning (about 20-30 times faster than the
+  binary representation, which the drivers used up to batch 2); `nat` stays unary) and run against HotSpot (`java` 21.0.12, `DiffRunner` via
   reflection) on the same inputs. Counts per method are in `harness/results/*.tsv` and STATUS.md.
 
 - Exception messages of VM-created exceptions are HotSpot 21's texts (the JVMS does not fix them); they are part
@@ -177,6 +180,166 @@ what a run does when no VirtualMachineError occurs, which is all a program can r
   CloneNotSupportedException), `java.util.Objects` (callbacks run as bytecode), `System.arraycopy` with
   HotSpot's checks in HotSpot's order and its messages, the String constructors and getBytes, and the
   `Double`/`Float` boxes (no decimal conversion).
+
+## 5f. The third batch: helpful NullPointerException messages, decimal conversions, Math, more model classes
+- `theories/Core/Machine.v`, "HotSpot's helpful NullPointerException messages": the message of the
+  NullPointerException of a null check in bytecode (invoke*, getfield/putfield, array loads and stores,
+  arraylength, athrow, monitorenter/monitorexit) as HotSpot 21 builds it (bytecodeUtils.cpp,
+  ExceptionMessageBuilder): its abstract interpretation of the method (passes in bytecode order, the stack
+  slots' source bcis, merges, the written-locals set, the early stop at the faulting bci, the switch
+  fall-through it also merges into), print_NPE_cause0 (5 levels; LocalVariableTable names, else this /
+  `<parameterN>` / `<localN>`; sipush printed unsigned; ldc prints nothing) and the failed action. Trusted
+  as a transcription of that C++ code; differentially tested by `NpeOps` with and without `-g`. An NPE
+  thrown in the frame of a lambda conversion (HotSpot: the lambda's hidden class) has no message, as in
+  HotSpot (`get_top_method_and_bci`). The loader keeps each method's LocalVariableTable and the
+  opcodes of its bipush/sipush/ldc int constants as class attributes `rocq.LVT <name><desc>` /
+  `rocq.OPS <name><desc>`.
+- `theories/Core/FloatDec.v`: the decimal conversions of double and float. `Double.toString` /
+  `Float.toString` (and String.valueOf, StringBuilder.append/insert, string concatenation, the boxes,
+  records) as the JDK 19+ Javadoc of Double.toString specifies the decimal (shortest in the rounding
+  interval, one or two digits competing when one suffices, closest, ties to the even significand) and
+  its plain or computerized scientific format; `parseDouble`/`parseFloat`/`valueOf(String)` as
+  FloatingDecimal.readJavaFormatString and parseHexString accept the text (trim, signs, NaN,
+  Infinity, points, exponents, f/F/d/D suffixes, hexadecimal significands) with their
+  NumberFormatException messages, the value rounded once (ties to even). Exact rational arithmetic
+  on Z. Checked by a standalone fuzz of the extracted functions (about 41,000 values and strings
+  against HotSpot) and by `FloatStrOps`.
+- `theories/Core/FloatMath.v`: Math/StrictMath abs, max, min, signum, copySign, floor, ceil, rint,
+  round, sqrt, fma, ulp, nextUp/nextDown/nextAfter, scalb, getExponent, IEEEremainder,
+  toRadians/toDegrees, and pow only where the specification fixes the result (its special cases;
+  integer arguments whose exact power is a double); exp/log/trigonometric functions and pow
+  otherwise are HotSpot intrinsics whose results the specification does not fix: STUCK. NaN results
+  are canonical (on x86 HotSpot, sqrt of a negative number gives the "indefinite" NaN
+  0xfff8000000000000; only doubleToRawLongBits sees the difference).
+- The model Formatter's e/E/f/g/G conversions follow JDK 21 (jdk.internal.math.FormattedFPDecimal:
+  the decimal of Double.toString rounded half up to the precision); the decimal comes from the
+  native `java.util.ModelEnv.decF/decE` (FloatDec.select). Hexadecimal floating point (a/A) rounds
+  the significand half-even to the precision (as java.util.Formatter.hexDouble) and prints with
+  `Double.toHexString`, which `FloatDec.to_hex` gives (with `Float.toHexString`). BigInteger (d o x X)
+  and BigDecimal (e f g) arguments follow JDK 21's `print(BigInteger)` / `print(BigDecimal)` and
+  `BigDecimalLayout` (on the java.math model classes below).
+- Reflection: float/double arguments (unboxing and widening) and results (boxing).
+- `Math.*Exact` messages ("integer overflow", "long overflow"), `floorDiv`/`floorMod` "/ by zero";
+  `Enum.compareTo`/`getDeclaringClass`, `Class.getEnumConstants` (calls `values()` as bytecode);
+  `Enum.valueOf(Class, String)` (and so every enum's generated `valueOf(String)`): searches `values()`
+  by `name()` as bytecode; "Name is null", "No enum constant <canonical name>.<name>" (the canonical
+  name from javac's binary names and the InnerClasses simple name: null for local enums),
+  "<name> is not an enum class".
+- `Integer`/`Long`/`Short`/`Byte` `parse*` and `valueOf(String[, radix])`, `parseInt`/`parseLong(CharSequence,
+  begin, end, radix)`: the JDK's accumulation (signs, Character.digit in the radix incl. Unicode decimal
+  digits and fullwidth letters, overflow at the first digit that exceeds the range) and every
+  NumberFormatException text ("For input string: ..." [" under radix r"], "Cannot parse null string",
+  "radix r less than Character.MIN_RADIX", "Error at index i in: ...", "Value out of range. ...", Long's
+  empty CharSequence ""), the index check of the CharSequence form and the Integer cache of valueOf.
+  `decode` (sign, 0x/0X/#/0 prefixes, "Zero length string", "Sign character in wrong position", Short/Byte
+  "Value v out of range from input s"), `toString(i, radix)`, `parseUnsignedInt`/`parseUnsignedLong(String[, radix])` (the JDK's short and long paths and
+  their messages), `reverse`, `reverseBytes`, `compareUnsigned`, `divideUnsigned`,
+  `remainderUnsigned`, `toUnsignedLong`, `toUnsignedString` (radix 10).
+  `StringBuilder.append(CharSequence, int, int)` / `append(char[], int, int)` with their checks.
+- Model classes: `java.time.Duration` (with `DateTimeException`, `DateTimeParseException`, `ChronoUnit`,
+  `TemporalUnit`, `TemporalAmount`, `Temporal`, `UnsupportedTemporalTypeException`; `Duration.parse` is a
+  hand-written parser of the JDK's pattern, products/quotients exact or STUCK), `java.util.LinkedList`
+  (with `AbstractSequentialList`), `EnumMap`, `EnumSet`/`RegularEnumSet` (JumboEnumSet, for enums of more
+  than 64 constants: STUCK), `AbstractMap.clone`.
+- `java.util.Locale` (language lower-cased with the legacy codes iw/in/ji mapped, region upper-cased,
+  variant; no scripts or extensions): constants, toString, equals, the JDK's hashCode, simple language
+  tags; `getDefault` is STUCK (it depends on the host). `String.toLowerCase/toUpperCase(Locale)` use the
+  locale-independent mapping except in tr/az/lt (STUCK); `String.format(Locale, ...)` / `new
+  Formatter(Locale)` accept null, ROOT, en, en_US/GB/CA (the same symbols as the model Formatter), others
+  STUCK. `System.lineSeparator()` and `System.getProperty` of line.separator / file.separator /
+  path.separator are "\n", "/", ":" (a Unix host, as `%n`; one String object per property); every other
+  property depends on the host and is STUCK. String/StringBuilder index and range checks
+  carry the JDK's StringIndexOutOfBoundsException texts.
+- StringBuilder: delete, replace, setCharAt, reverse (surrogate pairs kept), substring/subSequence (the
+  literal "" when empty), append(char[]), appendCodePoint, codePointAt/Before, compareTo, isEmpty,
+  ensureCapacity/trimToSize (no observable effect; capacity() is not modelled), StringBuilder(CharSequence),
+  append(StringBuffer). `java.lang.StringBuffer` is a model class over a private StringBuilder (synchronized;
+  its superclass is Object, so `getSuperclass` is STUCK). String/StringBuilder getChars, regionMatches,
+  contentEquals, codePointCount, offsetByCodePoints, chars, codePoints, lines, transform are written in Java
+  (`java.lang.ModelStrings`; the case-insensitive regionMatches is equalsIgnoreCase of the two regions), with
+  the JDK's stream characteristics (chars SIZED; codePoints SIZED only for Latin-1 strings; lines of unknown
+  size) and exception texts; `CharSequence.isEmpty` is `length() == 0`.
+- `java.util.UUID`: fromString (the JDK's fast 36-character path and the general dash-separated parse with
+  Long.parseLong's messages), toString, time-based fields, `nameUUIDFromBytes` (MD5 per RFC 1321, written in
+  the model), equals/hashCode/compareTo; `randomUUID` is STUCK.
+- `java.net.URI` / `URISyntaxException`: JDK 21's RFC 2396/2732 parser with its exact URISyntaxException
+  reasons and indices (registry-name fallback, server authority for the 7-argument constructor and
+  parseServerAuthority, IPv4, IPv6 with scope ids, ports), the multi-argument constructors' quoting,
+  raw and decoded getters (UTF-8 with U+FFFD), normalize/resolve/relativize (RFC 2396 5.2 and the
+  leading "./"), equals/hashCode/compareTo, URI.create. `toASCIIString` only for NFC-stable text (the
+  JDK normalizes first); toURL and serialization: STUCK.
+- `java.io.File`: the pure Unix path operations (normalisation of "//" runs and a trailing "/", name,
+  parent, path, isAbsolute, equals/compareTo/hashCode, File(URI) with its messages, listRoots,
+  getAbsolutePath of absolute paths, toURI without an isDirectory query); paths containing NUL are
+  invalid without the file system, as in JDK 21. Every file-system access, user.dir,
+  getCanonicalPath, toPath, toURL: STUCK.
+- The harness runs HotSpot with `-XX:-OmitStackTraceInFastThrow`, so hot implicit exceptions keep their
+  helpful messages.
+- `java.security.MessageDigest`: MD5 (RFC 1321), SHA-1, SHA-224/256/384/512, SHA-512/224, SHA-512/256 (FIPS
+  180-4) computed in the model (`java.security.ModelDigest`), looked up case-insensitively by the SUN
+  provider's names and aliases of the default JDK 21 configuration (an unknown name: NoSuchAlgorithmException
+  "<name> MessageDigest not available"); the object's class, toString, the update/digest argument checks
+  and messages, clone, isEqual. MD2, SHA-3, OID names, providers and ByteBuffer input: STUCK.
+  `Character.forDigit`, `Long.rotateLeft/Right`.
+- `Properties.load(Reader)` / `load(InputStream)`: the JDK's LineReader (chunks of 8192 chars or ISO-8859-1
+  bytes, comments, blank lines, continuation lines) and loadConvert (escapes, "Malformed \\uxxxx
+  encoding."); store/save write the current date: STUCK.
+- Records (`Machine.v`, ObjectMethods): when a component needs another object's toString/hashCode/equals,
+  the method runs as bytecode in ObjectMethods' order (toString as String.valueOf of each component;
+  hashCode 31 * h + hash(c) in component order; equals: the same object, instanceof, then the components
+  from the last to the first with ==, Float/Double.compare, Objects.equals, stopping at the first
+  difference). `Boolean/Short/Byte.hashCode(v)`.
+- Constructor references (`Foo::new`) whose arguments or result need LambdaMetafactory's conversions run as an
+  adapter frame `new Foo; dup; <converted arguments>; invokespecial <init>; <converted result>`.
+- `java.util.Arrays` (every public static method of JDK 21): object `sort`/`parallelSort` is JDK 21's
+  TimSort/ComparableTimSort transcribed (the same compare call sequence, the partial result after an
+  exception, "Comparison method violates its general contract!"); primitive sorts give
+  DualPivotQuicksort's unique result (float/double with the JDK's NaN and -0.0 handling); `binarySearch`
+  with the JDK's probe sequence; `equals`/`compare`/`compareUnsigned`/`mismatch` over ranges and with
+  comparators as ArraysSupport.mismatch (bit comparisons for float/double, `Objects.equals` only on
+  non-identical elements); `copyOf`/`copyOfRange` (a clone for the same length or whole range,
+  `Array.newInstance` of newType's component type), `fill`, `setAll`; `parallelPrefix` up to 16
+  elements and `parallelSetAll` up to 1 (the JDK runs them in the caller thread), larger ones and
+  `parallelSort` of more than 8192 objects STUCK (the common pool's order); `spliterator` STUCK.
+  `java.util.Arrays.useLegacyMergeSort` is assumed unset.
+- `java.util.Collections` (every public static method except the Sequenced* ones): the JDK's thresholds and
+  call sequences (binarySearch indexed or iterator-based, reverse/shuffle/fill/copy/rotate/replaceAll/
+  indexOfSubList), min/max in iteration order, disjoint's choice of the collection to iterate; the
+  unmodifiable, synchronized and checked views with the JDK's classes (RandomAccess variants, shared
+  mutexes, checked-type ClassCastException texts), nCopies (CopiesList), the shared empty/singleton
+  instances, newSetFromMap, asLifoQueue, enumeration (`Collections$3`), list, frequency, addAll,
+  reverseOrder. STUCK: `shuffle(List)` (a hidden unseeded Random), the Sequenced* views, spliterators
+  and parallel streams of the views. Both classes throw HotSpot's helpful NPE texts of the JDK's
+  implicit null checks explicitly.
+- `java.time` core (clean-room Java on JDK 21's algorithms): `Instant`, `LocalDate`, `LocalTime`,
+  `LocalDateTime`, `OffsetDateTime`, `ZonedDateTime` for fixed-offset zones (ZoneOffset and the UTC/GMT/UT
+  regions), `Year`, `YearMonth`, `Period`, `DayOfWeek`, `Month` (epoch-day arithmetic, end-of-month
+  adjustment, `until`, the caches, hashCode formulas, `toString` incl. years beyond 9999 and negative
+  years); `ZoneOffset`/`ZoneId` id parsing with the JDK's texts, `ZoneRules` for fixed offsets; fixed,
+  offset, tick and source `Clock`s, `InstantSource`, `now(Clock)`; the ISO chronology classes and the
+  temporal interfaces with their default methods (`ChronoField`, `ValueRange`, `TemporalQueries`,
+  `TemporalAdjusters`, `Duration.between/addTo/subtractFrom`); `DateTimeFormatter` and
+  `DateTimeFormatterBuilder` (the predefined ISO formatters except ISO_WEEK_DATE, RFC_1123, `ofPattern`
+  with the JDK's letter rules and errors, adjacent value parsing, reduced/fraction/instant/offset/zone-id
+  printer-parsers, `Parsed` resolution in every ResolverStyle with the DateTimeParseException texts;
+  month, day, AM/PM and era texts for en/en_US only). Parsed fields live in a HashMap as in the JDK, so
+  output that depends on its iteration follows 5c. STUCK: the host clock, zone and default locale
+  (formatters built with the default locale are STUCK only where a text needs it), region zones (tz
+  database), other locales, localized formatters and zone names, week/IsoFields/JulianFields fields, day
+  periods, non-ISO chronologies, OffsetTime, MonthDay, serialization.
+- `java.net.URLEncoder` / `URLDecoder` (HTML form encoding in a charset: the unreserved set, '+' for
+  space, `String.getBytes` per run of characters to encode (a UTF-16 run gets its byte-order mark),
+  upper-case hex; decoding of consecutive escapes with `Integer.parseInt(s, i+1, i+3, 16)` and the JDK's
+  IllegalArgumentException texts; the argument itself is returned when nothing changes).
+- `java.math`: `BigInteger`, `BigDecimal`, `MathContext`, `RoundingMode` (clean-room Java on JDK 21's
+  representation: signum + big-endian int magnitude; compact long or BigInteger + scale + precision
+  cache), their object identities (caches, returned operands) and messages; the arithmetic runs on
+  the natives `java.math.ModelBig` (Jdk.v `modelbig`: exact operations on Z, the magnitude encoded as
+  an int array). STUCK: random construction and `probablePrime`, primality above 81 bits, results
+  beyond the model bound (10^7 bits). Assumption: `isProbablePrime(c)` of an odd composite with
+  c >= 99 is claimed `false`; HotSpot answers `true` with probability at most 2^-100 (50 Miller-Rabin
+  rounds with random bases); below 99 it is STUCK. `MathContext.hashCode` uses the enum's identity
+  hash (untested).
 
 ## 6. Test drivers and assumptions stated in theorems
 - `harness/camel/wal-*/WalScenario.java` and `harness/camel/cim/.../CimScenario.java` are our test drivers for the

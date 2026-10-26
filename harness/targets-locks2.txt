@@ -1,0 +1,23 @@
+# ReentrantReadWriteLock, LockSupport, CyclicBarrier, Phaser, Exchanger, LinkedBlockingDeque, invokeAny / timed invokeAll,
+# Condition.awaitUntil models (classes/threadmodel) vs the real JDK 21, each input under 6 schedulers.
+# Build: harness/threads/build.sh   Run: MODE=threads harness/difftest.sh harness/targets-locks2.txt 20 <seed>
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 rwBasic (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 rwQueue (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 rwBarging (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 rwCond (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 rwCondInterrupt (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 rwDowngradeAwait (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 rwTimed (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 awaitUntil (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 lockSupport (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 barrier (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 barrierBreak (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 exchanger (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 phaser (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 phaserWait (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 phaserTree (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 invokeAny (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 invokeAllTimed (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 lbdOps (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 lbdBlocking (I)Ljava/lang/String; fresh
+classes/thread-tests:classes/threadmodel:classes/jdkmodel LockTests2 nullArgs (I)Ljava/lang/String; fresh

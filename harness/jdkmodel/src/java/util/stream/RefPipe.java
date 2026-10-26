@@ -101,7 +101,8 @@ final class RefPipe<T> extends Pipe implements Stream<T> {
     }
 
     public DoubleStream mapToDouble(ToDoubleFunction<? super T> mapper) {
-        throw ModelStuckS.unsupported("DoubleStream");
+        req(mapper);
+        return new DoublePipe(this, mapOp(o -> Double.valueOf(((ToDoubleFunction<Object>) (ToDoubleFunction) mapper).applyAsDouble(o)), SORTED | DISTINCT));
     }
 
     public <R> Stream<R> flatMap(Function<? super T, ? extends Stream<? extends R>> mapper) {
@@ -120,7 +121,8 @@ final class RefPipe<T> extends Pipe implements Stream<T> {
     }
 
     public DoubleStream flatMapToDouble(Function<? super T, ? extends DoubleStream> mapper) {
-        throw ModelStuckS.unsupported("DoubleStream");
+        req(mapper);
+        return new DoublePipe(this, flatMapOp((Function<Object, Object>) (Function) mapper, 3));
     }
 
     public <R> Stream<R> mapMulti(BiConsumer<? super T, ? super Consumer<R>> mapper) {
@@ -142,7 +144,9 @@ final class RefPipe<T> extends Pipe implements Stream<T> {
     }
 
     public DoubleStream mapMultiToDouble(BiConsumer<? super T, ? super DoubleConsumer> mapper) {
-        throw ModelStuckS.unsupported("DoubleStream");
+        req(mapper);
+        BiConsumer<Object, Object> m = (BiConsumer<Object, Object>) (BiConsumer) mapper;
+        return new DoublePipe(this, mapMultiOp((t, sink) -> m.accept(t, sink)));
     }
 
     public Stream<T> peek(Consumer<? super T> action) {

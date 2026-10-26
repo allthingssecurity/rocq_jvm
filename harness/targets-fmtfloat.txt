@@ -1,0 +1,4 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.FmtFloatOps fmt (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.FmtFloatOps common (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.FmtFloatOps hex (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.FmtFloatOps bigs (I)Ljava/lang/String;

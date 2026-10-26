@@ -1,0 +1,2 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.DStreamOps pipes (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.DStreamOps collectors (I)Ljava/lang/String;

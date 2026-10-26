@@ -1,0 +1,3 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.FileOps paths (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.FileOps join (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.FileOps misc (I)Ljava/lang/String;

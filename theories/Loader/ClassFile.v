@@ -403,6 +403,60 @@ Record classfile := {
   cf_attrs : list attribute;      (** class attributes (BootstrapMethods, ...) *)
 }.
 
+(** The LocalVariableTable of a Code attribute (raw bytes), if any. *)
+Definition code_lvt (c : cp) (l : bytes) : option bytes :=
+  let* (_, l) := u2 l in let* (_, l) := u2 l in let* (len, l) := u4 l in
+  let* (_, l) := take (Z.to_nat len) l in
+  let* (nh, l) := u2 l in let* (_, l) := take (Z.to_nat (8 * nh)) l in
+  let* (na, l) := u2 l in let* (ats, _) := attributes (Z.to_nat na) c l in
+  find_attr "LocalVariableTable" ats.
+
+(** The code bytes of a Code attribute. *)
+Definition code_bytes (l : bytes) : option bytes :=
+  let* (_, l) := u2 l in let* (_, l) := u2 l in let* (len, l) := u4 l in
+  let* (bs, _) := take (Z.to_nat len) l in Some bs.
+
+(** The pcs and opcodes of the int constants pushed by bipush, sipush, ldc or ldc_w (the other
+    [Iconst] instructions are iconst_<i>), as a flat list pc, opcode, pc, opcode, ... *)
+Fixpoint push_ops (fuel : nat) (pos : Z) (l : bytes) (ins : list (Z * instr)) : list Z :=
+  match fuel with
+  | O => nil
+  | S f =>
+      match ins with
+      | nil => nil
+      | (p, i) :: r =>
+          let l' := skipn (Z.to_nat (p - pos)) l in
+          match i, l' with
+          | Iconst _, op :: _ => if (16 <=? op) && (op <=? 19) then p :: op :: push_ops f p l' r else push_ops f p l' r
+          | _, _ => push_ops f p l' r
+          end
+      end
+  end.
+
+Fixpoint method_code (name desc : string) (ms : list method) : option code :=
+  match ms with
+  | nil => None
+  | m :: r => if String.eqb (m_name m) name && String.eqb (m_desc m) desc then m_code m else method_code name desc r
+  end.
+
+(** Kept as class attributes "rocq.OPS <name><desc>" (the constant pushes above) and
+    "rocq.LVT <name><desc>" (the LocalVariableTable), for HotSpot's NullPointerException
+    messages. *)
+Definition lvt_attrs (c : cp) (ms : list member) (meths : list method) : list attribute :=
+  flat_map (fun m => match find_attr "Code" (mb_attrs m) with
+                     | Some bs =>
+                         let ops := match code_bytes bs, method_code (mb_name m) (mb_desc m) meths with
+                                    | Some cb, Some cd => push_ops (S (length (c_instrs cd))) 0 cb (c_instrs cd)
+                                    | _, _ => nil
+                                    end in
+                         (String.append "rocq.OPS " (String.append (mb_name m) (mb_desc m)), ops) ::
+                         match code_lvt c bs with
+                         | Some t => [(String.append "rocq.LVT " (String.append (mb_name m) (mb_desc m)), t)]
+                         | None => nil
+                         end
+                     | None => nil
+                     end) ms.
+
 Fixpoint u2s (n : nat) (l : bytes) : option (list Z * bytes) :=
   match n with
   | O => Some (nil, l)
@@ -427,7 +481,7 @@ Definition parse_class (l : bytes) : option classfile :=
   let* (na, l) := u2 l in let* (ats, _) := attributes (Z.to_nat na) c l in
   Some {| cf_major := major; cf_cp := c; cf_access := acc; cf_this := this; cf_super := super;
           cf_interfaces := ifnames; cf_fields := fs; cf_methods := meths;
-          cf_attrs := ats |}.
+          cf_attrs := app ats (lvt_attrs c ms meths) |}.
 
 Fixpoint find_method_in (name desc : string) (ms : list method) : option method :=
   match ms with

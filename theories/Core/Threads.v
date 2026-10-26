@@ -431,7 +431,7 @@ Definition thread_step0 (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i
         let timed := String.eqb (mr_desc mr) "(J)V" in
         match (if timed then match st with VLong ms :: VRef o :: r => Some (o, ms, r) | VLong _ :: VNull :: _ => None | _ => None end
                else match st with VRef o :: r => Some (o, 0, r) | _ => None end) with
-        | None => throw_in p tm i t NPE None
+        | None => throw_in p tm i t NPE (npe_message p top)
         | Some (o, ms, r) =>
             (* Object.wait(long) checks the timeout first, then the VM checks the owner, then
                the interrupt status (JDK 21, ObjectMonitor::wait) *)
@@ -451,7 +451,7 @@ Definition thread_step0 (p : program) (mdl : model) (ch : nat) (tm : tmstate) (i
               let n := waiters (tm_threads tm') o in
               let which := if String.eqb (mr_name mr) "notify" then Some (Nat.modulo ch (Nat.max n 1)) else None in
               TRNext (with_threads tm' (wake (tm_threads tm') o which))
-        | _ => throw_in p tm i t NPE None
+        | _ => throw_in p tm i t NPE (npe_message p top)
         end
       else machine_step p mdl tm i t
   | _ => machine_step p mdl tm i t

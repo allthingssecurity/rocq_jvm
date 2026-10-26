@@ -23,7 +23,7 @@ make -f Makefile.rocq theories/Extract.vo       # model only (Core, Loader, Jdk)
 harness/build.sh                                # everything, incl. the Camel proofs and the 3 drivers: ~1 h
 # differential-test prerequisites (not committed):
 mkdir -p harness/work/slf4j && (cd harness/work/slf4j && unzip -q -o /path/to/slf4j-api-2.0.x.jar 'org/*')
-javac -d harness/work harness/java/*.java && java -cp harness/work UnicodeTables harness/work/unicode-21.txt
+javac -d harness/work harness/java/*.java && java --add-opens java.base/java.lang=ALL-UNNAMED -cp harness/work UnicodeTables harness/work/unicode-21.txt
 ```
 
 To build just the model and drivers without the Camel proofs, run `harness/build_driver.sh` (it does not build `threads_main`; see `harness/build.sh` for that line).

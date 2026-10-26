@@ -2,6 +2,8 @@
 package java.util.concurrent;
 public class ExecutionException extends Exception {
     private final Throwable cause;
+    protected ExecutionException() { super(); this.cause = null; }
+    protected ExecutionException(String message) { super(message); this.cause = null; }
     public ExecutionException(Throwable cause) { super(cause == null ? null : cause.toString()); this.cause = cause; }
     public ExecutionException(String message, Throwable cause) { super(message); this.cause = cause; }
     @Override public synchronized Throwable getCause() { return cause; }

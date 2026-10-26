@@ -1,0 +1,5 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CollOps2 algos (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CollOps2 minmax (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CollOps2 views (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CollOps2 misc (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.CollOps2 nulls (I)Ljava/lang/String;

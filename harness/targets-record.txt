@@ -1,0 +1,2 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.RecordOps records (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.RecordOps ctors (I)Ljava/lang/String;

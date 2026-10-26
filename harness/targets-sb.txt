@@ -1,0 +1,3 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SbOps builder (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SbOps buffer (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SbOps strs (I)Ljava/lang/String;

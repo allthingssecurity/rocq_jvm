@@ -1,0 +1,2 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.UrlOps enc (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.UrlOps dec (I)Ljava/lang/String;

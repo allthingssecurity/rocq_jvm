@@ -33,6 +33,52 @@ Record uenv := {
   u_is_lower : Z -> bool;       (** Character.isLowerCase(int) *)
 }.
 
+(** More of the JDK's Character data, read through [u_digit] at radix codes the JDK never uses
+    (so that existing environments stay valid): 1000 = Character.getType, 1001 = property bits
+    (1 isJavaIdentifierStart, 2 isJavaIdentifierPart, 4 isUnicodeIdentifierStart,
+    8 isUnicodeIdentifierPart, 16 isIdentifierIgnorable, 32 isAlphabetic, 64 isIdeographic,
+    128 isSpaceChar, 256 isTitleCase, 512 isDefined, 1024 isMirrored, 2048 Character.toUpperCaseEx
+    differs from toUpperCase), 1002 = getNumericValue,
+    1003 = the UTF-16 units of String.toUpperCase of the code point when special casing expands
+    it (packed u1 + u2*2^16 + u3*2^32 + n*2^48), else -1. *)
+Definition u_type (e : uenv) (c : Z) : Z := u_digit e c 1000.
+Definition u_props (e : uenv) (c : Z) : Z := u_digit e c 1001.
+Definition u_numeric (e : uenv) (c : Z) : Z := u_digit e c 1002.
+Definition u_prop (e : uenv) (c bit : Z) : bool := Z.testbit (u_props e c) bit.
+Definition u_upperx (e : uenv) (c : Z) : option (list Z) :=
+  let x := u_digit e c 1003 in
+  if x <? 2 ^ 48 then None   (* no expansion (also for environments that leave the code alone) *)
+  else let n := Z.shiftr x 48 in
+       Some (firstn (Z.to_nat n) [Z.land x 65535; Z.land (Z.shiftr x 16) 65535; Z.land (Z.shiftr x 32) 65535]).
+
+(** ** String.toUpperCase / toLowerCase (default locale not tr/az/lt: the JDK then needs no
+    context except for the final sigma, which is not modelled) *)
+Definition utf16_of (cp : Z) : list Z :=
+  if cp <? 65536 then [cp] else [Z.shiftr (cp - 65536) 10 + 55296; Z.land (cp - 65536) 1023 + 56320].
+
+Fixpoint case_map (f : Z -> list Z) (a : list Z) : list Z :=
+  match a with
+  | nil => nil
+  | c :: r =>
+      if (55296 <=? c) && (c <=? 56319) then
+        match r with
+        | d :: r' => if (56320 <=? d) && (d <=? 57343)
+                     then app (f (Z.shiftl (c - 55296) 10 + (d - 56320) + 65536)) (case_map f r')
+                     else c :: case_map f r
+        | nil => [c]
+        end
+      else if (56320 <=? c) && (c <=? 57343) then c :: case_map f r
+      else app (f c) (case_map f r)
+  end.
+
+Definition upper_units (e : uenv) (a : list Z) : list Z :=
+  case_map (fun cp => match u_upperx e cp with Some l => l | None => utf16_of (u_upper e cp) end) a.
+
+(** None: the string has a GREEK CAPITAL LETTER SIGMA (its lower case depends on word boundaries). *)
+Definition lower_units (e : uenv) (a : list Z) : option (list Z) :=
+  if existsb (fun c => c =? 931) a then None
+  else Some (case_map (fun cp => if cp =? 304 then [105; 775] else utf16_of (u_lower e cp)) a).
+
 (** What every JDK satisfies on ASCII (checked against the real tables by the harness). *)
 Definition ascii_upper (c : Z) : Z := if (97 <=? c) && (c <=? 122) then c - 32 else c.
 Definition ascii_lower (c : Z) : Z := if (65 <=? c) && (c <=? 90) then c + 32 else c.

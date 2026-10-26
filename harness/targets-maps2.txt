@@ -1,0 +1,6 @@
+# IdentityHashMap, WeakHashMap, Hashtable, Properties (MapOps2). Run: MODE=machine FUEL=60000000 harness/difftest.sh harness/targets-maps2.txt 300 9
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps2 identity (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps2 weak (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps2 table (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps2 props (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MapOps2 common (I)Ljava/lang/String;

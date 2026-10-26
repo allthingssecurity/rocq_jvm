@@ -122,7 +122,15 @@ Lemma m_charAt : forall h n a b c pc stk lv l u i ch,
   h l = Some (OStr u) -> nth_unit u i = Some ch ->
   jdk_model cim_p e "java/lang/String" "charAt" "(I)C" [VRef l; VInt i] (st h n a b c pc stk lv)
   = MOk (Some (VInt ch)) (st h n a b c pc stk lv).
-Proof. intros. unfold jdk_model. cbv -[nth_unit st]. cbn [ms_heap st]. rewrite H. cbv -[nth_unit st]. rewrite H0. reflexivity. Qed.
+Proof.
+  intros.
+  (* the String model alone (its charAt case), then the dispatch of jdk_model to it *)
+  assert (Hs : string_model e "charAt" "(I)C" [VRef l; VInt i] (st h n a b c pc stk lv)
+               = MOk (Some (VInt ch)) (st h n a b c pc stk lv)).
+  { unfold string_model. cbv -[nth_unit st char_at sioobe_index]. cbn [ms_heap st]. rewrite H.
+    cbv -[nth_unit st sioobe_index]. rewrite H0. reflexivity. }
+  unfold jdk_model. cbv -[string_model string_static object_model st]. rewrite Hs. reflexivity.
+Qed.
 
 Lemma m_upper : forall s ch,
   jdk_model cim_p e "java/lang/Character" "toUpperCase" "(C)C" [VInt ch] s = MOk (Some (VInt (i2c (u_upper (j_u e) ch)))) s.

@@ -3,7 +3,7 @@
  * thread that finds others waiting queues behind them); a non-fair one lets a newcomer take a free
  * lock. tryLock() barges even when fair (Javadoc). lock() is not interruptible (an interrupt during
  * lock() is remembered and re-asserted, as in AQS); lockInterruptibly() is. Conditions:
- * newCondition() (await / signal / signalAll, timed awaits). awaitUntil(Date) is STUCK.
+ * newCondition() (await / signal / signalAll, timed awaits, awaitUntil(Date)).
  */
 package java.util.concurrent.locks;
 
@@ -176,8 +176,33 @@ public class ReentrantLock implements Lock, java.io.Serializable {
             return rem;
         }
         public boolean await(long time, TimeUnit unit) throws InterruptedException { return awaitNanos(unit.toNanos(time)) > 0; }
-        public boolean awaitUntil(java.util.Date deadline) throws InterruptedException { return awaitUntil0(); }
-        private native boolean awaitUntil0();
+        /** As awaitNanos, with a deadline on currentTimeMillis; true unless the deadline passed first. */
+        public boolean awaitUntil(java.util.Date deadline) throws InterruptedException {
+            if (deadline == null) throw new NullPointerException("Cannot invoke \"java.util.Date.getTime()\" because \"deadline\" is null");
+            long abstime = deadline.getTime();
+            if (Thread.interrupted()) throw new InterruptedException();
+            if (!lock.ownedByMe()) throw new IllegalMonitorStateException();
+            InterruptedException ie = null;
+            int h;
+            boolean signalled = false;
+            synchronized (this) {
+                h = lock.releaseAll();
+                int gen = generation;
+                waiting++;
+                try {
+                    long now;
+                    while (permits == 0 && gen == generation && (now = System.currentTimeMillis()) < abstime) {
+                        wait(abstime - now);
+                    }
+                    if (gen != generation) signalled = true;
+                    else if (permits > 0) { permits--; signalled = true; }
+                } catch (InterruptedException e) { ie = e; }
+                waiting--;
+            }
+            lock.reacquire(h);
+            if (ie != null) throw ie;
+            return signalled;
+        }
         public void signal() {
             if (!lock.ownedByMe()) throw new IllegalMonitorStateException();
             synchronized (this) { if (waiting > permits) { permits++; notifyAll(); } }

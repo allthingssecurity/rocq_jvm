@@ -1,0 +1,3 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MathFOps dbl (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MathFOps flt (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.MathFOps pow (I)Ljava/lang/String;

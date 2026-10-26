@@ -1,8 +1,8 @@
 /*
  * rocq-jvm model (clean-room, Apache-2.0): the LongStream implementation of the model (a stage of
  * a sequential pipeline whose elements travel as Long boxes). distinct() is boxed().distinct()
- * .mapToLong(..) as the JDK documents it; DoubleStream conversions, iterator() (PrimitiveIterator),
- * spliterator(), summaryStatistics() and parallel() are STUCK.
+ * .mapToLong(..) as the JDK documents it; iterator() (PrimitiveIterator), spliterator() and
+ * parallel() are STUCK.
  */
 package java.util.stream;
 
@@ -103,7 +103,8 @@ final class LongPipe extends Pipe implements LongStream {
     }
 
     public DoubleStream mapToDouble(LongToDoubleFunction mapper) {
-        throw ModelStuckS.unsupported("DoubleStream");
+        req(mapper);
+        return new DoublePipe(this, mapOp(o -> Double.valueOf(mapper.applyAsDouble(v(o))), SORTED | DISTINCT));
     }
 
     public LongStream flatMap(LongFunction<? extends LongStream> mapper) {
@@ -151,7 +152,7 @@ final class LongPipe extends Pipe implements LongStream {
     }
 
     public DoubleStream asDoubleStream() {
-        throw ModelStuckS.unsupported("DoubleStream");
+        return new DoublePipe(this, mapOp(o -> Double.valueOf((double) v(o)), 0));
     }
 
     public Stream<Long> boxed() {
@@ -231,7 +232,7 @@ final class LongPipe extends Pipe implements LongStream {
     }
 
     public LongSummaryStatistics summaryStatistics() {
-        throw ModelStuckS.unsupported("LongStream.summaryStatistics (LongSummaryStatistics)");
+        return collect(LongSummaryStatistics::new, LongSummaryStatistics::accept, LongSummaryStatistics::combine);
     }
 
     public boolean anyMatch(LongPredicate predicate) {

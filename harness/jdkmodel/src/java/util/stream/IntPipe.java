@@ -1,8 +1,8 @@
 /*
  * rocq-jvm model (clean-room, Apache-2.0): the IntStream implementation of the model (a stage of
  * a sequential pipeline whose elements travel as Integer boxes). distinct() is boxed().distinct()
- * .mapToInt(..) as the JDK documents it; DoubleStream conversions, iterator() (PrimitiveIterator),
- * spliterator(), summaryStatistics() and parallel() are STUCK.
+ * .mapToInt(..) as the JDK documents it; iterator() (PrimitiveIterator), spliterator() and
+ * parallel() are STUCK.
  */
 package java.util.stream;
 
@@ -103,7 +103,8 @@ final class IntPipe extends Pipe implements IntStream {
     }
 
     public DoubleStream mapToDouble(IntToDoubleFunction mapper) {
-        throw ModelStuckS.unsupported("DoubleStream");
+        req(mapper);
+        return new DoublePipe(this, mapOp(o -> Double.valueOf(mapper.applyAsDouble(v(o))), SORTED | DISTINCT));
     }
 
     public IntStream flatMap(IntFunction<? extends IntStream> mapper) {
@@ -155,7 +156,7 @@ final class IntPipe extends Pipe implements IntStream {
     }
 
     public DoubleStream asDoubleStream() {
-        throw ModelStuckS.unsupported("DoubleStream");
+        return new DoublePipe(this, mapOp(o -> Double.valueOf((double) v(o)), 0));
     }
 
     public Stream<Integer> boxed() {
@@ -235,7 +236,7 @@ final class IntPipe extends Pipe implements IntStream {
     }
 
     public IntSummaryStatistics summaryStatistics() {
-        throw ModelStuckS.unsupported("IntStream.summaryStatistics (IntSummaryStatistics)");
+        return collect(IntSummaryStatistics::new, IntSummaryStatistics::accept, IntSummaryStatistics::combine);
     }
 
     public boolean anyMatch(IntPredicate predicate) {

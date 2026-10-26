@@ -4,7 +4,7 @@
  * NoSuchElementException("No value present"); equals/hashCode/toString as documented.
  * A null functional argument that the JDK dereferences without an explicit check is STUCK
  * (the JDK's NullPointerException has a "helpful" message).
- * toString (Double.toString) and stream() (DoubleStream) are STUCK.
+ * toString and stream() as the JDK.
  */
 package java.util;
 
@@ -67,7 +67,7 @@ public final class OptionalDouble {
     }
 
     public java.util.stream.DoubleStream stream() {
-        throw ModelStuck.unsupported("OptionalDouble.stream (DoubleStream)");
+        return isPresent ? java.util.stream.DoubleStream.of(value) : java.util.stream.DoubleStream.empty();
     }
 
     public double orElse(double other) {
@@ -108,7 +108,6 @@ public final class OptionalDouble {
 
     @Override
     public String toString() {
-        if (isPresent) throw ModelStuck.unsupported("OptionalDouble.toString (Double.toString)");
-        return "OptionalDouble.empty";
+        return isPresent ? ("OptionalDouble[" + value + "]") : "OptionalDouble.empty";
     }
 }

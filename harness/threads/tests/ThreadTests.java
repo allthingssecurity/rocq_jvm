@@ -175,6 +175,25 @@ public class ThreadTests {
         return Thread.currentThread().getName() + "/" + got[0] + "/" + (Thread.currentThread() == t ? "same" : "other");
     }
 
+    /** A new thread takes its creator's daemon status and priority. */
+    public static String inherit(int n) throws Exception {
+        StringBuilder out = new StringBuilder();
+        boolean d = (n & 1) != 0;
+        int pr = 1 + Math.floorMod(n, 10);
+        Thread t = new Thread(() -> {
+            Thread c = new Thread(() -> { });
+            Thread c2 = new Thread(() -> { }, "c2");
+            synchronized (out) { out.append(c.isDaemon()).append(c.getPriority()).append(c2.isDaemon()).append(c2.getPriority()); }
+        }, "p");
+        t.setDaemon(d);
+        t.setPriority(pr);
+        Thread m = new Thread(() -> { });
+        out.append(m.isDaemon()).append(m.getPriority()).append(';');
+        t.start();
+        t.join();
+        return out.toString();
+    }
+
     static final class Sub extends Thread {
         final int[] out; final int k;
         Sub(int[] out, int k) { super("sub"); this.out = out; this.k = k; }

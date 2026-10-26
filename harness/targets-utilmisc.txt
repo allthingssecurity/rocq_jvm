@@ -1,0 +1,3 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.UtilMiscOps tokenizer (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.UtilMiscOps checksums (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.UtilMiscOps random (I)Ljava/lang/String;

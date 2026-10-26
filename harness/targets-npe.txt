@@ -1,0 +1,2 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.NpeOps npes (I)Ljava/lang/String;
+classes/jdkmodel-tests-nog:classes/jdkmodel org.rocqjvm.jdkmodel.NpeOps npes (I)Ljava/lang/String;

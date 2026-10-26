@@ -22,8 +22,18 @@ public class Thread implements Runnable {
 
     private static synchronized int nextThreadNum() { return threadNumber++; }
 
-    public Thread() { this.name = "Thread-" + nextThreadNum(); this.nameUnknown = numberingUnknown; }
-    public Thread(Runnable task) { this.target = task; this.name = "Thread-" + nextThreadNum(); this.nameUnknown = numberingUnknown; }
+    public Thread() { inherit(); this.name = "Thread-" + nextThreadNum(); this.nameUnknown = numberingUnknown; }
+    public Thread(Runnable task) { inherit(); this.target = task; this.name = "Thread-" + nextThreadNum(); this.nameUnknown = numberingUnknown; }
+
+    // JDK 21: a new platform thread takes its creator's daemon status and its priority (capped by
+    // the thread group's maximum, 10 for the main group); unknown values stay unknown
+    private void inherit() {
+        Thread parent = currentThread();
+        this.daemon = parent.daemon;
+        this.priority = Math.min(parent.priority, MAX_PRIORITY);
+        this.daemonUnknown = parent.daemonUnknown;
+        this.priorityUnknown = parent.priorityUnknown;
+    }
 
     // Threads of CompletableFuture's default executor are ForkJoinPool.commonPool() workers or a new
     // Thread per task, depending on the host's processor count, which the model does not know: the
@@ -41,8 +51,8 @@ public class Thread implements Runnable {
         return t;
     }
     private static native RuntimeException hostDependent(String what);
-    public Thread(String name) { this.name = checkName(name); }
-    public Thread(Runnable task, String name) { this.target = task; this.name = checkName(name); }
+    public Thread(String name) { inherit(); this.name = checkName(name); }
+    public Thread(Runnable task, String name) { inherit(); this.target = task; this.name = checkName(name); }
 
     private static String checkName(String name) {
         if (name == null) throw new NullPointerException("'name' is null");

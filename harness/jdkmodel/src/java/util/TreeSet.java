@@ -1,20 +1,25 @@
 /*
- * rocq-jvm model of java.util.TreeSet (clean-room, Apache-2.0), from the Javadoc: a NavigableSet
- * backed by a TreeMap whose values are a shared marker object.
- * Not modelled (STUCK): subSet/headSet/tailSet, descendingSet, clone, serialization.
+ * rocq-jvm model of java.util.TreeSet (clean-room, Apache-2.0): a NavigableSet backed by a
+ * NavigableMap (a TreeMap, or one of its sub-map / descending views for subSet, headSet, tailSet
+ * and descendingSet) whose values are a shared marker object.
+ * Not modelled (STUCK): serialization, spliterators.
  */
 package java.util;
 
 public class TreeSet<E> extends AbstractSet<E> implements NavigableSet<E>, Cloneable, java.io.Serializable {
-    private transient TreeMap<E, Object> m;
+    private transient NavigableMap<E, Object> m;
     private static final Object PRESENT = new Object();
 
+    TreeSet(NavigableMap<E, Object> m) {
+        this.m = m;
+    }
+
     public TreeSet() {
-        m = new TreeMap<>();
+        this(new TreeMap<>());
     }
 
     public TreeSet(Comparator<? super E> comparator) {
-        m = new TreeMap<>(comparator);
+        this(new TreeMap<>(comparator));
     }
 
     public TreeSet(Collection<? extends E> c) {
@@ -23,20 +28,25 @@ public class TreeSet<E> extends AbstractSet<E> implements NavigableSet<E>, Clone
     }
 
     public TreeSet(SortedSet<E> s) {
-        this(s.comparator());
+        this(nonNullSorted(s).comparator());
         addAll(s);
     }
 
+    private static <E> SortedSet<E> nonNullSorted(SortedSet<E> s) {
+        if (s == null) throw TreeMap.invokeOnNull("java.util.SortedSet.comparator()", "s");
+        return s;
+    }
+
     public Iterator<E> iterator() {
-        return m.keyIterator();
+        return m.navigableKeySet().iterator();
     }
 
     public Iterator<E> descendingIterator() {
-        return m.descendingKeyIterator();
+        return m.descendingKeySet().iterator();
     }
 
     public NavigableSet<E> descendingSet() {
-        throw ModelStuck.unsupported("TreeSet.descendingSet");
+        return new TreeSet<>(m.descendingMap());
     }
 
     public int size() {
@@ -63,7 +73,22 @@ public class TreeSet<E> extends AbstractSet<E> implements NavigableSet<E>, Clone
         m.clear();
     }
 
+    /** JDK: into an empty TreeSet-backed map, a non-empty SortedSet with an equal comparator is
+     *  copied in order without comparisons; otherwise AbstractCollection.addAll. */
     public boolean addAll(Collection<? extends E> c) {
+        if (m.size() == 0) {
+            if (c == null) throw TreeMap.invokeOnNull("java.util.Collection.size()", "c");
+            if (c.size() > 0 && c instanceof SortedSet && m instanceof TreeMap) {
+                TreeMap<E, Object> map = (TreeMap<E, Object>) m;
+                Comparator<?> cc = ((SortedSet<?>) c).comparator();
+                Comparator<?> mc = map.comparator();
+                if (cc == mc || (cc != null && cc.equals(mc))) {
+                    map.addAllForTreeSet((SortedSet<? extends E>) c, PRESENT);
+                    return true;
+                }
+            }
+        }
+        if (c == null) throw TreeMap.invokeOnNull("java.util.Collection.iterator()", "c");
         boolean modified = false;
         for (E e : c) {
             if (add(e)) modified = true;
@@ -72,27 +97,27 @@ public class TreeSet<E> extends AbstractSet<E> implements NavigableSet<E>, Clone
     }
 
     public NavigableSet<E> subSet(E fromElement, boolean fromInclusive, E toElement, boolean toInclusive) {
-        throw ModelStuck.unsupported("TreeSet.subSet");
+        return new TreeSet<>(m.subMap(fromElement, fromInclusive, toElement, toInclusive));
     }
 
     public NavigableSet<E> headSet(E toElement, boolean inclusive) {
-        throw ModelStuck.unsupported("TreeSet.headSet");
+        return new TreeSet<>(m.headMap(toElement, inclusive));
     }
 
     public NavigableSet<E> tailSet(E fromElement, boolean inclusive) {
-        throw ModelStuck.unsupported("TreeSet.tailSet");
+        return new TreeSet<>(m.tailMap(fromElement, inclusive));
     }
 
     public SortedSet<E> subSet(E fromElement, E toElement) {
-        throw ModelStuck.unsupported("TreeSet.subSet");
+        return subSet(fromElement, true, toElement, false);
     }
 
     public SortedSet<E> headSet(E toElement) {
-        throw ModelStuck.unsupported("TreeSet.headSet");
+        return headSet(toElement, false);
     }
 
     public SortedSet<E> tailSet(E fromElement) {
-        throw ModelStuck.unsupported("TreeSet.tailSet");
+        return tailSet(fromElement, true);
     }
 
     public Comparator<? super E> comparator() {
@@ -133,6 +158,7 @@ public class TreeSet<E> extends AbstractSet<E> implements NavigableSet<E>, Clone
         return (e == null) ? null : e.getKey();
     }
 
+    /** JDK: the backing map is copied with new TreeMap(SortedMap) (same comparator, in order). */
     @SuppressWarnings("unchecked")
     public Object clone() {
         TreeSet<E> clone;

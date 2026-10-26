@@ -1,0 +1,4 @@
+# PriorityQueue and BitSet (PqOps). Run: MODE=machine FUEL=60000000 harness/difftest.sh harness/targets-pq.txt 300 9
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.PqOps pq (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.PqOps bitset (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.PqOps common (I)Ljava/lang/String;

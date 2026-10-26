@@ -79,6 +79,23 @@ a user object in string concatenation), identity hash codes.
 | `CharsetOps` (String.getBytes / new String(byte[], ...) in UTF-8 (malformed input), ISO-8859-1, US-ASCII, UTF-16/BE/LE; Charset lookup, names, errors; String(char[]/StringBuilder/String) constructors; Double/Float boxes: equals/hashCode/compareTo/compare/bit conversions) | 4 | 300 | 0 |
 | `CfTests` (CompletableFuture: chains, errors, exact dependent order (nested, combine/either, allOf/anyOf), cancel, timeouts, waiters, rejection; StampedLock stamps, queue, threads) × 6 schedules | 15 | 20 | 0 |
 | `CowThreads` (copy-on-write lists/sets and concurrent linked queues/deques under three or four threads) × 6 schedules | 4 | 20 | 0 |
+| `NpeOps` (HotSpot's helpful NullPointerException messages: every null-check bytecode, sources of the null value through locals, fields, array elements, calls, conditionals and merges; with and without `-g`) | 2 | 300 | 0 |
+| `FloatStrOps` (Double/Float.toString shortest decimals, parseDouble/parseFloat/valueOf of decimal and hexadecimal text, NumberFormatException messages) | 2 | 300 | 0 |
+| `MathFOps` (Math/StrictMath floor, ceil, rint, round, sqrt, fma, ulp, nextUp/Down/After, scalb, getExponent, IEEEremainder, copySign, signum, min/max on float and double; pow) | 3 | 300 | 0 (pow: 40 no-claims where the specification does not fix the result) |
+| `FmtFloatOps` (Formatter e/E/f/g/G/a/A of Float and Double with random flags, widths and precisions; BigInteger d/o/x/X and BigDecimal e/f/g; specifier errors) | 4 | 300 | 0 |
+| `ArraysOps`, `ArraysOps2` (Arrays toString/equals/hashCode/deep*, every sort (TimSort compare sequence, contract violation), binarySearch, copyOf/copyOfRange, fill, setAll, mismatch/compare, parallel*; reflection with float/double; lambda equality) | 11 | 300 | 0 (parallel: 19 no-claims, sizes the common pool would split) |
+| `CollOps2` (Collections algorithms with the JDK's thresholds, min/max, the unmodifiable/synchronized/checked views, nCopies, singletons, null handling) | 5 | 300 | 0 |
+| `DStreamOps` (DoubleStream pipelines, compensated sums, summary statistics, double collectors) | 2 | 300 | 0 |
+| `CharOps` (Character classification and case for all code points, String case mapping, Integer/Long/Short/Byte parse/valueOf/decode/parseUnsigned/toString(radix) with every NumberFormatException text, String/StringBuilder index messages, Locale, String.format(Locale), System line/file/path separators) | 6 | 300 | 0 (locales: 167 no-claims, locales that format differently from English) |
+| `SbOps` (StringBuilder delete/replace/reverse/setCharAt/substring/appendCodePoint/codePointAt/compareTo, StringBuffer, String getChars/regionMatches/contentEquals/codePointCount/offsetByCodePoints/chars/codePoints/lines/transform) | 3 | 300 | 0 |
+| `UrlOps`, `UriOps`, `FileOps` (URLEncoder/URLDecoder in the six charsets; java.net.URI parse, constructors, getters, normalize/resolve/relativize, compare, authority, toASCIIString; java.io.File path operations) | 13 | 300 | 0 |
+| `UuidOps`, `DigestOps`, `PropsOps` (UUID parse/format/MD5 names; MessageDigest MD5/SHA-1/SHA-2 streaming, clone, errors; Properties.load from Readers and streams) | 3 | 300 | 0 |
+| `RecordOps` (record toString/hashCode/equals calling components' methods, logged call order; constructor references needing conversions) | 2 | 300 | 0 |
+| `EnumOps` (EnumMap, EnumSet, Enum methods, Enum.valueOf and generated valueOf with their messages, unsigned int/long operations) | 4 | 300 | 0 |
+| `LinkedOps`, `NavOps`, `PqOps`, `SkipOps`, `MapOps2` (LinkedList; TreeMap/TreeSet navigable views; PriorityQueue, BitSet; ConcurrentSkipListMap/Set; IdentityHashMap, WeakHashMap (no collection), Hashtable, Properties) | 17 | 300 | 0 (props: 14 no-claims) |
+| `BigIntOps`, `DecOps` (BigInteger and BigDecimal: constructors, parsing, arithmetic, division and rounding modes, scale, MathContext, pow/sqrt, conversions, edge cases) | 13 | 300 | 0 |
+| `IoOps`, `Base64Ops`, `UtilMiscOps` (in-memory java.io streams, readers, writers, buffered/data/print/pushback layers, charset codecs; Base64 codecs and streams; StringTokenizer, CRC32/Adler32/CRC32C, seeded Random) | 16 | 300 | 0 |
+| `TimeOps`, `DurationOps` (java.time Instant, LocalDate/Time/DateTime, Offset/ZonedDateTime with fixed offsets, Period, Year/YearMonth, fields and adjusters, DateTimeFormatter ISO and pattern formatting and parsing, user temporal classes, clocks; Duration) | 21 | 300 | 0 (zoned 3, fmt 19, fmt2 13: region zones and week/quarter fields; Duration ops 31: beyond exact long arithmetic) |
 | `CaseInsensitiveMap.caseInsensitiveHash` main + fix | 2 | 20,000 random strings incl. surrogates | 0 |
 | java.util model classes (`targets-jdkmodel.txt`: HashMap, LinkedHashMap, tree bins, copies, ctors, sizing, strings, views, sets, ArrayList, AbstractList, AbstractMap, Collections) | 13 (+1 STUCK by design: identity-hash tie-break) | 10,000 | 0 |
 | CaseInsensitiveMap whole class (`CimScenario.run`: random put/remove/get/containsKey sequences of 1..200 ops checked against a reference map; result = slot-array lengths of the final map) main + fix | 2 | 2,000 runs each | 0 |
@@ -269,31 +286,34 @@ calls are on receivers of the declaring class, no boxed values are stored into t
 - `jsr`/`ret` (not needed), dynamic constants (condy; e.g. `EnumDesc` labels of a pattern switch over a sealed type
   with qualified enum constants are `STUCK`).
 - invokedynamic: the conversions LambdaMetafactory adds (boxing, unboxing, widening, casts, dropped results) run
-  as an adapter frame; constructor references (`Foo::new`) that need conversions are `STUCK`; record `toString` of
-  float/double components (Float/Double.toString) and of components that need `toString()`/`hashCode()`/`equals()`
-  of another object (a call back into bytecode) are `STUCK`; so are pattern-switch label tests that would call `equals()`.
+  as an adapter frame (also for constructor references `Foo::new`); pattern-switch label tests that would call
+  `equals()` are `STUCK`.
 - invokeinterface where several maximally-specific default methods match: JVMS 6.5 says
   IncompatibleClassChangeError, HotSpot 21 throws AbstractMethodError (corpus7 `changed`, case 1): `STUCK` (no claim).
 - Access control (IllegalAccessError for private/protected/package access, putstatic to a final field outside
   `<clinit>`) and loader constraints are not checked: javac never emits such accesses in a jointly compiled program.
 - Fast paths assume a link-consistent class set (see "Field and method resolution" below and TRUST.md).
 - Exception messages: the exceptions the machine creates, the reflection exceptions, and exceptions created by user
-  code with the java.lang constructors carry their message; exceptions made by other JDK models (`MThrow`, e.g.
-  NumberFormatException) have none (the harness compares only their class). Helpful NullPointerException messages,
-  ClassCastException messages and the linkage errors' messages are not modelled. Causes (other than
+  code with the java.lang constructors carry their message; exceptions made by other JDK models with `MThrow` (a few
+  of the Rocq-side models) have none (the harness compares only their class). ClassCastException messages
+  and the linkage errors' messages are not modelled. Causes (other than
   InvocationTargetException's target) and stack traces are not modelled.
 - Threads: the semantics is sequentially consistent (see TRUST.md 5b): the extra behaviours the JMM allows for racy
   programs are not generated; the formal link of `Threads.tstep` to `Concurrency/Executions.v` is not written.
   Daemon threads and priorities' effect: not observable (uncaught-exception handlers are modelled).
 - Class loaders (ClassLoader objects, defineClass, loading constraints) are not modelled: one program, loaded by
   one (bootstrap-like) loader. The bytecode verifier (JVMS 4.10) is not modelled: the class files are javac's.
-- The JDK library beyond the models listed above (I/O beyond the exception classes, java.time construction,
-  parallel streams and DoubleStream, decimal conversion of floating-point numbers (`Double.toString`,
-  `parseDouble`, `%f`, `%e`), charsets other than the six standard ones, regex lookbehind, PatternSyntaxException
-  messages, captures the JDK may leak between attempts, locale-sensitive case mapping of non-ASCII strings, ...)
+- The JDK library beyond the models listed above (files, sockets and other I/O outside memory, ByteBuffer/CharBuffer,
+  java.time region time zones, the host clock/zone/default locale, non-English and localized date formatting,
+  week/quarter fields, non-ISO chronologies, OffsetTime, MonthDay, the default locale and locale-sensitive formatting other than English/root, unseeded
+  Random,
+  parallel streams, `Math.exp/log/sin/...` and `Math.pow` where the specification does not
+  fix the result, charsets other than the six standard ones, regex lookbehind, PatternSyntaxException
+  messages, captures the JDK may leak between attempts, `String.toLowerCase` of a capital sigma (final-sigma rule) and the tr/az/lt case rules (the default locale is assumed not to be one of them), ...)
   is `STUCK`.
-- HotSpot's helpful NullPointerException messages (JEP 358) of null checks in user bytecode are not computed:
-  `getMessage()` of such an exception is STUCK (the model classes throw the JDK's exact messages themselves).
-- A thread does not inherit its creator's daemon status and priority in the Thread model (JDK: it does);
-  thread pools normalise both, so only directly created threads in daemon threads differ.
+- HotSpot's helpful NullPointerException messages (JEP 358) are computed for null checks in user bytecode
+  (HotSpot's own analysis, TRUST.md 5f); `getMessage()` is STUCK for implicit null checks in the model classes'
+  own bytecode (they throw the JDK's exact messages themselves where the JDK has them) and where HotSpot's
+  analysis has undefined behaviour (an `ldc` of a MethodHandle, MethodType or dynamic constant before the
+  null check).
 - VirtualMachineErrors are never thrown (TRUST.md 5a).

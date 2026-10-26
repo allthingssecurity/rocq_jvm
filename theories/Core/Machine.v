@@ -32,7 +32,7 @@
 
 From Stdlib Require Import ZArith String Ascii List Bool Lia.
 From JVM.Core Require Import Int Instr Desc Semantics JdkTables.
-From JVM.Core Require Float.
+From JVM.Core Require Float FloatDec.
 From JVM.Loader Require Import ClassFile.
 Import ListNotations.
 Open Scope string_scope.
@@ -634,6 +634,477 @@ Definition NPE := "java/lang/NullPointerException".
 Definition AIOOBE := "java/lang/ArrayIndexOutOfBoundsException".
 Definition aioobe_msg (i : Z) (n : nat) : list Z :=
   app (ascii_units "Index ") (app (z_units i) (app (ascii_units " out of bounds for length ") (z_units (Z.of_nat n)))).
+
+(** ** HotSpot's helpful NullPointerException messages (JEP 358)
+
+    For a null check of the bytecode itself (invoke*, getfield/putfield, the array instructions,
+    athrow, monitorenter/monitorexit), HotSpot 21 builds the message from the method's bytecode
+    (ExceptionMessageBuilder, src/hotspot/share/interpreter/bytecodeUtils.cpp): the failed action
+    ("Cannot invoke ...") and, when it can describe where the null came from, a cause
+    (" because "<expression>" is null"). The model follows that code step by step:
+    - the abstract interpretation of the method (the constructor of ExceptionMessageBuilder):
+      passes over the instructions in bytecode order until every reached instruction has a
+      stack (or a pass adds none), stopping as soon as the scan arrives at the faulting bci with
+      a stack there; per slot, the bci of the instruction that pushed it (two different bcis
+      merge to unknown) and per stack the set of local slots written on the way (stores);
+      stacks merged into the successors in HotSpot's order (fall-through, branch target,
+      switch targets — the switch instructions also fall through, as in HotSpot);
+    - print_NPE_cause0: locals (LocalVariableTable names, else this / <parameterN> /
+      <localN>, a parameter slot counting as a parameter only while not written on the way),
+      null, int constants (iconst/bipush; sipush printed unsigned as HotSpot does; ldc prints
+      nothing), int/object array elements, static and instance fields, return values; at most 5
+      levels; for any other source instruction, the opening of the cause clause alone (HotSpot prints it before it looks at the instruction).
+    The model makes no claim (None: getMessage is STUCK) where HotSpot's analysis has undefined
+    behaviour (ldc of a MethodHandle, MethodType or dynamic constant pushes nothing there), for
+    the code of model classes (java.*, javax.*, jdk.*, sun.*, com.sun.*: HotSpot runs the real
+    JDK's bytecode there) and of the machine's synthetic frames. The loader keeps each method's
+    LocalVariableTable and the pcs of its bipush/sipush/ldc int constants as class attributes
+    "rocq.LVT <name><desc>" and "rocq.OPS <name><desc>" (the opcode tells iconst, bipush,
+    sipush and ldc apart). *)
+
+(** The frames of lambda conversions: HotSpot's lambda classes are hidden, and for an exception
+    thrown in a hidden frame HotSpot computes no message (get_top_method_and_bci). *)
+Definition LAMBDA_FRAME := "<lambda>".
+
+Inductive nsrc : Type := NUnknown | NAt (pc : Z).
+
+Definition nsize (t : jtype) : Z := match t with TLong | TDouble => 2 | _ => 1 end.
+Definition desc_size (d : string) : Z :=
+  match field_type d with Some t => nsize t | None => 1 end.
+Definition params_size (d : string) : option Z :=
+  match parse_mdesc d with
+  | Some (ps, _) => Some (fold_left (fun n t => n + nsize t) ps 0)
+  | None => None
+  end.
+Definition ret_size (d : string) : option Z :=
+  match parse_mdesc d with
+  | Some (_, Some t) => Some (nsize t)
+  | Some (_, None) => Some 0
+  | None => None
+  end.
+
+Definition npop (n : Z) (st : list nsrc) : list nsrc := skipn (Z.to_nat n) st.
+Definition npush (n : Z) (x : nsrc) (st : list nsrc) : list nsrc := app (repeat x (Z.to_nat n)) st.
+Definition nth_src (st : list nsrc) (k : Z) : nsrc := nth (Z.to_nat k) st NUnknown.
+Definition kind_size (k : tkind) : Z := match k with KL | KD => 2 | _ => 1 end.
+Definition akind_size (k : akind) : Z := match k with AL | AD => 2 | _ => 1 end.
+
+(** The symbolic stack after [i] (at [pc]), as do_instruction; None: no claim (see above). *)
+Definition nsim (pc : Z) (i : instr) (st : list nsrc) : option (list nsrc) :=
+  let me := NAt pc in
+  let g n m := Some (npush m me (npop n st)) in
+  match i with
+  | Nop | Iinc _ _ | Goto _ | Ret _ => Some st
+  | AconstNull | Iconst _ | Fconst _ => g 0 1
+  | Lconst _ | Dconst _ => g 0 2
+  | Ldc (LdcString _ | LdcClass _) => g 0 1
+  | Ldc _ => None
+  | Load k _ => g 0 (kind_size k)
+  | Store k _ => Some (npop (kind_size k) st)
+  | ALoadArr k => g 2 (akind_size k)
+  | AStoreArr k => Some (npop (2 + akind_size k) st)
+  | Pop => Some (npop 1 st)
+  | Pop2 => Some (npop 2 st)
+  | Dup => let a := nth_src st 0 in Some (a :: st)
+  | DupX1 => let a := nth_src st 0 in let b := nth_src st 1 in Some (a :: b :: a :: npop 2 st)
+  | DupX2 => let a := nth_src st 0 in let b := nth_src st 1 in let c := nth_src st 2 in Some (a :: b :: c :: a :: npop 3 st)
+  | Dup2 => let a := nth_src st 0 in let b := nth_src st 1 in Some (a :: b :: a :: b :: npop 2 st)
+  | Dup2X1 => let a := nth_src st 0 in let b := nth_src st 1 in let c := nth_src st 2 in
+              Some (a :: b :: c :: a :: b :: npop 3 st)
+  | Dup2X2 => let a := nth_src st 0 in let b := nth_src st 1 in let c := nth_src st 2 in let d := nth_src st 3 in
+              Some (a :: b :: c :: d :: a :: b :: npop 4 st)
+  | Swap => let a := nth_src st 0 in let b := nth_src st 1 in Some (b :: a :: npop 2 st)
+  | IBin _ | FBin _ => g 2 1
+  | LBin (Shl | Shr | Ushr) => g 3 2
+  | LBin _ | DBin _ => g 4 2
+  | INeg | FNeg => g 1 1
+  | LNeg | DNeg => g 2 2
+  | Conv c => match c with
+              | I2L | I2D | F2L | F2D => g 1 2
+              | I2F | F2I | I2B | I2C | I2S => g 1 1
+              | L2I | L2F | D2I | D2F => g 2 1
+              | L2D | D2L => g 2 2
+              end
+  | Lcmp => g 4 1
+  | FCmp (Fcmpl | Fcmpg) => g 2 1
+  | FCmp _ => g 4 1
+  | If _ _ | IfNull _ _ | Tableswitch _ _ _ _ | Lookupswitch _ _ => Some (npop 1 st)
+  | IfIcmp _ _ | IfAcmp _ _ => Some (npop 2 st)
+  | Jsr _ => g 0 1
+  | Return _ | Athrow => Some nil
+  | Getstatic fr => g 0 (desc_size (fr_desc fr))
+  | Putstatic fr => Some (npop (desc_size (fr_desc fr)) st)
+  | Getfield fr => g 1 (desc_size (fr_desc fr))
+  | Putfield fr => Some (npop (1 + desc_size (fr_desc fr)) st)
+  | Invoke k mr =>
+      match params_size (mr_desc mr), ret_size (mr_desc mr) with
+      | Some n, Some r => g (match k with InvStatic => n | _ => n + 1 end) r
+      | _, _ => None
+      end
+  | Invokedynamic _ _ d =>
+      match params_size d, ret_size d with Some n, Some r => g n r | _, _ => None end
+  | New _ => g 0 1
+  | Newarray _ | Anewarray _ | Arraylength | Instanceof _ => g 1 1
+  | Checkcast _ => Some st                       (* HotSpot: the slot keeps its source *)
+  | Monitorenter | Monitorexit => Some (npop 1 st)
+  | Multianewarray _ d => g d 1
+  end.
+
+(** Whether the flow ends after [i], and its branch targets in HotSpot's merge order. *)
+Definition nflow (i : instr) : bool * list Z :=
+  match i with
+  | Goto t | Jsr t => (true, [t])
+  | Ret _ | Return _ | Athrow => (true, nil)
+  | If _ t | IfIcmp _ t | IfAcmp _ t | IfNull _ t => (false, [t])
+  | Tableswitch d _ _ ts => (false, d :: ts)
+  | Lookupswitch d ps => (false, d :: map snd ps)
+  | _ => (false, nil)
+  end.
+
+(** A simulated stack: the sources (top first) and the written local slots (a bit set; slots
+    above 63 count as written, as in HotSpot). *)
+Record nst := mknst { ns_stack : list nsrc; ns_written : Z }.
+
+Definition nsrc_merge (a b : nsrc) : nsrc :=
+  match a, b with NAt x, NAt y => if x =? y then a else NUnknown | _, _ => NUnknown end.
+
+Fixpoint nmerge_list (a b : list nsrc) : option (list nsrc) :=
+  match a, b with
+  | nil, nil => Some nil
+  | x :: r, y :: r' => match nmerge_list r r' with Some m => Some (nsrc_merge x y :: m) | None => None end
+  | _, _ => None
+  end.
+
+Definition nmerge (a b : nst) : option nst :=
+  match nmerge_list (ns_stack a) (ns_stack b) with
+  | Some l => Some (mknst l (Z.lor (ns_written a) (ns_written b)))
+  | None => None
+  end.
+
+Definition set_written (n w : Z) : Z := if 63 <? n then w else Z.lor w (Z.shiftl 1 n).
+Definition was_written (n w : Z) : bool := (63 <? n) || Z.testbit w n.
+
+Fixpoint nlookup (pc : Z) (m : list (Z * nst)) : option nst :=
+  match m with nil => None | (q, s) :: r => if q =? pc then Some s else nlookup pc r end.
+
+Fixpoint nput (pc : Z) (s : nst) (m : list (Z * nst)) : list (Z * nst) :=
+  match m with nil => [(pc, s)] | (q, s') :: r => if q =? pc then (q, s) :: r else (q, s') :: nput pc s r end.
+
+Definition is_some {A} (o : option A) : bool := match o with Some _ => true | None => false end.
+
+(** ExceptionMessageBuilder::merge for each target, in order; the local stack takes in each
+    existing stack (HotSpot merges into its working copy). *)
+Fixpoint nmerge_into (ts : list Z) (local : nst) (m : list (Z * nst)) (added : bool) (ent : Z)
+  : option (list (Z * nst) * bool * Z) :=
+  match ts with
+  | nil => Some (m, added, ent)
+  | t :: r =>
+      match nlookup t m with
+      | Some e => match nmerge local e with
+                  | Some l' => nmerge_into r l' (nput t l' m) added ent
+                  | None => None
+                  end
+      | None => nmerge_into r local (nput t local m) true (ent + Z.of_nat (length (ns_stack local)))
+      end
+  end.
+
+(** One pass of the constructor's loop: (stacks, all processed, added one, entries, stopped). *)
+Fixpoint npass (bci len : Z) (l : list (Z * instr)) (m : list (Z * nst)) (allp added : bool) (ent : Z)
+  : option (list (Z * nst) * bool * bool * Z * bool) :=
+  match l with
+  | nil => Some (m, allp, added, ent, false)
+  | (pc, i) :: rest =>
+      let next := match rest with (q, _) :: _ => q | nil => len end in
+      let r := match nlookup pc m with
+               | None => Some (m, false, added, ent)
+               | Some st =>
+                   match nsim pc i (ns_stack st) with
+                   | None => None
+                   | Some s' =>
+                       let w := match i with Store _ n => set_written n (ns_written st) | _ => ns_written st end in
+                       let (ended, ts) := nflow i in
+                       match nmerge_into (if ended then ts else next :: ts) (mknst s' w) m added ent with
+                       | Some (m', added', ent') => Some (m', allp, added', ent')
+                       | None => None
+                       end
+                   end
+               end in
+      match r with
+      | None => None
+      | Some (m', allp', added', ent') =>
+          if (next =? bci) && is_some (nlookup next m') then Some (m', true, added', ent', true)
+          else if 1000000 <? ent' then Some (m', allp', added', ent', true)
+          else npass bci len rest m' allp' added' ent'
+      end
+  end.
+
+Fixpoint nloop (fuel : nat) (bci : Z) (c : code) (m : list (Z * nst)) (ent : Z) : option (list (Z * nst)) :=
+  match fuel with
+  | O => None
+  | S k =>
+      match npass bci (c_length c) (c_instrs c) m true false ent with
+      | None => None
+      | Some (m', allp, added, ent', stop) =>
+          if stop then Some m' else if negb allp && added then nloop k bci c m' ent' else Some m'
+      end
+  end.
+
+(** The stacks of HotSpot's analysis for a null check at [bci]: bci 0 empty, each handler
+    entry (first occurrence) the caught exception. *)
+Definition nanalysis (c : code) (bci : Z) : option (list (Z * nst)) :=
+  let m0 := fold_left (fun m h => if is_some (nlookup (h_pc h) m) then m else nput (h_pc h) (mknst [NAt (h_pc h)] 0) m)
+                      (c_handlers c) [(0, mknst nil 0)] in
+  nloop (S (S (S (length (c_instrs c))))) bci c m0 0.
+
+Fixpoint assoc_pc (pc : Z) (l : list (Z * instr)) : option instr :=
+  match l with nil => None | (q, i) :: r => if q =? pc then Some i else assoc_pc pc r end.
+
+(** The LocalVariableTable name of [slot] at [bci], from the raw attribute bytes. *)
+Fixpoint lvt_find (c : ClassFile.cp) (n : nat) (bs : bytes) (bci slot : Z) : option string :=
+  match n with
+  | O => None
+  | S k =>
+      match u2 bs with
+      | Some (st, b1) => match u2 b1 with
+        | Some (ln, b2) => match u2 b2 with
+          | Some (ni, b3) => match u2 b3 with
+            | Some (_, b4) => match u2 b4 with
+              | Some (sl, b5) => if (st <=? bci) && (bci <? st + ln) && (sl =? slot) then cp_utf8 c ni
+                                 else lvt_find c k b5 bci slot
+              | None => None end
+            | None => None end
+          | None => None end
+        | None => None end
+      | None => None
+      end
+  end.
+
+Definition method_attr (p : program) (cls : string) (m : method) (kind : string) : option (ClassFile.cp * bytes) :=
+  match find_class p cls with
+  | Some cf => match find_attr (String.append kind (String.append (m_name m) (m_desc m))) (cf_attrs cf) with
+               | Some bs => Some (cf_cp cf, bs)
+               | None => None
+               end
+  | None => None
+  end.
+
+Definition lvt_name (p : program) (cls : string) (m : method) (bci slot : Z) : option string :=
+  match method_attr p cls m "rocq.LVT " with
+  | Some (c, bs) => match u2 bs with
+                    | Some (cnt, r) => lvt_find c (Z.to_nat cnt) r bci slot
+                    | None => None
+                    end
+  | None => None
+  end.
+
+(** The opcode of the int constant push at [pc]: bipush, sipush, ldc, ldc_w (the loader's
+    "rocq.OPS" attribute), else 0 (iconst_<i>). *)
+Fixpoint ops_find (pc : Z) (l : list Z) : Z :=
+  match l with q :: op :: r => if q =? pc then op else ops_find pc r | _ => 0 end.
+Definition opcode_at (p : program) (cls : string) (m : method) (pc : Z) : option Z :=
+  match method_attr p cls m "rocq.OPS " with
+  | Some (_, l) => Some (ops_find pc l)
+  | None => None
+  end.
+
+(** The parameter number (1-based) of [slot], if it is a parameter's slot. *)
+Definition param_number (m : method) (slot : Z) : option Z :=
+  match parse_mdesc (m_desc m) with
+  | Some (ps, _) =>
+      let fix go (ps : list jtype) (curr k : Z) : option Z :=
+        match ps with
+        | nil => None
+        | t :: r => let sz := nsize t in
+                    if (curr <=? slot) && (slot <? curr + sz) then Some k else go r (curr + sz) (k + 1)
+        end in
+      go ps (if is_static m then 0 else 1) 1
+  | None => None
+  end.
+
+(** print_local_var; [written]: the slot was written on the way (then not a parameter). *)
+Definition local_desc (p : program) (cls : string) (m : method) (written : bool) (bci slot : Z) : option (list Z) :=
+  match lvt_name p cls m bci slot with
+  | Some nm => utf8_units nm
+  | None =>
+      if negb (is_static m) && (slot =? 0) && negb written then Some (ascii_units "this")
+      else match param_number m slot with
+           | Some k => if written then Some (app (ascii_units "<local") (app (z_units slot) [62]))
+                       else Some (app (ascii_units "<parameter") (app (z_units k) [62]))
+           | None => Some (app (ascii_units "<local") (app (z_units slot) [62]))
+           end
+  end.
+
+(** print_klass_name: the external name, java.lang.Object and java.lang.String abbreviated. *)
+Definition nm_units (s : string) : list Z := match utf8_units s with Some u => u | None => ascii_units s end.
+
+Definition npe_klass (c : string) : list Z :=
+  if String.eqb c "java/lang/Object" then ascii_units "Object"
+  else if String.eqb c "java/lang/String" then ascii_units "String"
+  else class_name_units c.
+
+Fixpoint ext_type (t : jtype) : list Z :=
+  match t with
+  | TBool => ascii_units "boolean" | TByte => ascii_units "byte" | TChar => ascii_units "char"
+  | TShort => ascii_units "short" | TInt => ascii_units "int" | TLong => ascii_units "long"
+  | TFloat => ascii_units "float" | TDouble => ascii_units "double"
+  | TRef c => class_name_units c
+  | TArr e => app (ext_type e) (ascii_units "[]")
+  end.
+
+Definition java_lang : list Z := ascii_units "java.lang.".
+Fixpoint prefix_units (a b : list Z) : bool :=
+  match a, b with nil, _ => true | x :: r, y :: r' => (x =? y) && prefix_units r r' | _, nil => false end.
+
+(** trim_well_known_class_names: a parameter starting "java.lang.Object" / "java.lang.String"
+    loses "java.lang." (also e.g. java.lang.StringBuilder: HotSpot matches the prefix only). *)
+Definition trim_param (u : list Z) : list Z :=
+  if prefix_units (ascii_units "java.lang.Object") u || prefix_units (ascii_units "java.lang.String") u
+  then skipn (length java_lang) u else u.
+
+Fixpoint join_params (l : list (list Z)) : list Z :=
+  match l with nil => nil | [x] => x | x :: r => app x (app (ascii_units ", ") (join_params r)) end.
+
+Definition npe_method (mr : methodref) : list Z :=
+  let ps := match parse_mdesc (mr_desc mr) with Some (ps, _) => ps | None => nil end in
+  app (npe_klass (mr_class mr)) (app [46] (app (nm_units (mr_name mr))
+    (app [40] (app (join_params (map (fun t => trim_param (ext_type t)) ps)) [41])))).
+
+(** print_NPE_cause0 over the stacks [sm]: None = no claim; Some (r, text) = HotSpot prints
+    [text] and returns [r]. *)
+Fixpoint npe_cause (fuel : nat) (p : program) (cls : string) (m : method) (c : code)
+         (sm : list (Z * nst)) (bci slot : Z) (detail : nat) (inner prefix : bool)
+  : option (bool * list Z) :=
+  match fuel with
+  | O => None
+  | S fu =>
+    match detail with
+    | O => Some (false, nil)
+    | S d =>
+      match nlookup bci sm with
+      | None => Some (false, nil)
+      | Some st =>
+        match nth_src (ns_stack st) slot with
+        | NUnknown => Some (false, nil)
+        | NAt spc =>
+          match assoc_pc spc (c_instrs c) with
+          | None => None
+          | Some i =>
+            let is_inv := match i with Invoke _ _ => true | _ => false end in
+            let pre := if Nat.eqb detail 5 && prefix && negb is_inv then ascii_units " because """ else nil in
+            let ret t := Some (true, app pre t) in
+            match i with
+            | Load (KA | KI) n => match local_desc p cls m (was_written n (ns_written st)) spc n with
+                                  | Some u => ret u
+                                  | None => None
+                                  end
+            | AconstNull => ret (ascii_units "null")
+            | Iconst z => match opcode_at p cls m spc with
+                          | Some op => if op =? 0 then ret (z_units z)
+                                       else if op =? 16 then ret (z_units z)
+                                       else if op =? 17 then ret (z_units (if z <? 0 then z + 65536 else z))
+                                       else Some (false, pre)
+                          | None => None
+                          end
+            | ALoadArr (AI | AA) =>
+                match npe_cause fu p cls m c sm spc 1 d inner false, npe_cause fu p cls m c sm spc 0 detail true false with
+                | Some (ba, ta), Some (bi, ti) =>
+                    ret (app (if ba then ta else ascii_units "<array>") (app [91] (app (if bi then ti else ascii_units "...") [93])))
+                | _, _ => None
+                end
+            | Getstatic fr => ret (app (npe_klass (fr_class fr)) (app [46] (nm_units (fr_name fr))))
+            | Getfield fr =>
+                match npe_cause fu p cls m c sm spc 0 d inner false with
+                | Some (b, t) => ret (app (if b then app t [46] else nil) (nm_units (fr_name fr)))
+                | None => None
+                end
+            | Invoke _ mr => ret (app (if Nat.eqb detail 5 && negb inner then ascii_units " because the return value of """ else nil)
+                                      (npe_method mr))
+            | _ => Some (false, pre)
+            end
+          end
+        end
+      end
+    end
+  end.
+
+Definition akind_name (k : akind) : string :=
+  match k with
+  | AI => "int" | AL => "long" | AF => "float" | AD => "double" | AA => "object"
+  | AB => "byte/boolean" | AC => "char" | AS => "short"
+  end.
+
+(** The failed action and the stack slot of the null operand (get_NPE_null_slot; a constructor
+    call: HotSpot prints no message, no claim here). *)
+Definition npe_action (i : instr) : option (list Z * Z) :=
+  match i with
+  | Invoke InvStatic _ => None
+  | Invoke _ mr => if String.eqb (mr_name mr) "<init>" then None else
+                   match params_size (mr_desc mr) with
+                   | Some n => Some (app (ascii_units "Cannot invoke """) (app (npe_method mr) [34]), n)
+                   | None => None
+                   end
+  | Getfield fr => Some (app (ascii_units "Cannot read field """) (app (nm_units (fr_name fr)) [34]), 0)
+  | Putfield fr => Some (app (ascii_units "Cannot assign field """) (app (nm_units (fr_name fr)) [34]), desc_size (fr_desc fr))
+  | Arraylength => Some (ascii_units "Cannot read the array length", 0)
+  | ALoadArr k => Some (ascii_units (String.append "Cannot load from " (String.append (akind_name k) " array")), 1)
+  | AStoreArr k => Some (ascii_units (String.append "Cannot store to " (String.append (akind_name k) " array")), 1 + akind_size k)
+  | Athrow => Some (ascii_units "Cannot throw exception", 0)
+  | Monitorenter => Some (ascii_units "Cannot enter synchronized block", 0)
+  | Monitorexit => Some (ascii_units "Cannot exit synchronized block", 0)
+  | _ => None
+  end.
+
+(** Code HotSpot does not run as the model does: the model's own JDK classes and the
+    machine's synthetic frames. *)
+Definition prefix_str (a s : string) : bool := String.eqb (String.substring 0 (String.length a) s) a.
+Definition npe_unclaimed (cls : string) (m : method) : bool :=
+  String.eqb (m_name m) "<model>" || String.eqb cls LAMBDA_FRAME || prefix_str "java/" cls || prefix_str "javax/" cls ||
+  prefix_str "jdk/" cls || prefix_str "sun/" cls || prefix_str "com/sun/" cls.
+
+(** The message of the NullPointerException thrown by the null check of the instruction at the
+    frame's pc (None: no claim). *)
+Definition npe_message (p : program) (top : cframe) : option (list Z) :=
+  let c := cf_code top in
+  let bci := f_pc (cf_frame top) in
+  if npe_unclaimed (cf_class top) (cf_method top) then None else
+  match assoc_pc bci (c_instrs c) with
+  | None => None
+  | Some i =>
+    match npe_action i with
+    | None => None
+    | Some (act, slot) =>
+      match nanalysis c bci with
+      | None => None
+      | Some sm =>
+        match npe_cause 16 p (cf_class top) (cf_method top) c sm bci slot 5 false true with
+        | Some (true, u) => Some (app act (app u (ascii_units """ is null")))
+        | Some (false, u) => Some (app act u)
+        | None => None
+        end
+      end
+    end
+  end.
+
+(** Throw the NullPointerException of the current instruction's null check. *)
+Definition same_mref (a b : methodref) : bool :=
+  String.eqb (mr_class a) (mr_class b) && String.eqb (mr_name a) (mr_name b) && String.eqb (mr_desc a) (mr_desc b).
+
+Definition throw_npe (p : program) (s : mstate) (top : cframe) : mstep :=
+  if String.eqb (cf_class top) LAMBDA_FRAME then throw_msg p s NPE None else
+  match npe_message p top with
+  | Some u => throw_msg p s NPE (Some u)
+  | None => throw_new p s NPE
+  end.
+
+(** For an invoke on a null receiver: the message only if the frame's instruction is that invoke
+    (do_invoke also serves calls through lambda objects, whose null receivers [invoke_obj]
+    handles first). *)
+Definition npe_invoke (p : program) (s : mstate) (top : cframe) (mr : methodref) : mstep :=
+  if String.eqb (cf_class top) LAMBDA_FRAME then throw_msg p s NPE None else
+  match assoc_pc (f_pc (cf_frame top)) (c_instrs (cf_code top)) with
+  | Some (Invoke _ mr') => if same_mref mr mr' then throw_npe p s top else throw_new p s NPE
+  | _ => throw_new p s NPE
+  end.
 
 (** ** Class initialisation (JVMS 5.5, single thread). *)
 (** A class whose <clinit> failed is erroneous: later uses throw NoClassDefFoundError. *)
@@ -1439,8 +1910,8 @@ Definition concat_recipe (cf : classfile) (bi : Z) : option (list Z * list (list
   end.
 
 (** String conversion of one concatenation argument (String.valueOf rules for
-    the primitive types, String and null; anything that needs a toString()
-    call back into bytecode, or float/double, is not modelled yet). *)
+    the primitive types incl. float/double (FloatDec), String and null; anything that needs a
+    toString() call back into bytecode is not modelled yet). *)
 (** toString of a box (Integer, Long, Short, Byte, Character, Boolean: final JDK classes) or of a
     StringBuilder. *)
 Definition box_string (o : object) : option (list Z) :=
@@ -1451,6 +1922,8 @@ Definition box_string (o : object) : option (list Z) :=
       else if String.eqb c "java/lang/Boolean" then Some (if z =? 0 then [102; 97; 108; 115; 101] else [116; 114; 117; 101])
       else None
   | OObj c [("value", VLong z)] => if String.eqb c "java/lang/Long" then Some (z_units z) else None
+  | OObj c [("value", VDouble b)] => if String.eqb c "java/lang/Double" then FloatDec.dtoa b else None
+  | OObj c [("value", VFloat b)] => if String.eqb c "java/lang/Float" then FloatDec.ftoa b else None
   | OSb u => Some u
   | _ => None
   end.
@@ -1471,7 +1944,9 @@ Definition concat_arg (h : heap) (t : jtype) (v : value) : string + list Z :=
                   end
       | None => inl "string concat: argument needs toString() (callback not modelled yet)"
       end
-  | _, _ => inl "string concat: float/double argument (Phase 5) or type mismatch"
+  | TDouble, VDouble b => match FloatDec.dtoa b with Some u => inr u | None => inl "string concat: double" end
+  | TFloat, VFloat b => match FloatDec.ftoa b with Some u => inr u | None => inl "string concat: float" end
+  | _, _ => inl "string concat: type mismatch"
   end.
 
 Fixpoint concat_go (fuel : nat) (h : heap) (recipe : list Z) (consts : list (list Z))
@@ -1533,16 +2008,21 @@ Definition invoke_frame_go (top : cframe) (rest : list cframe) (nx : pc) (st' : 
   else MStuck "operand stack overflow (max_stack)".
 
 (** Push the frame of a model's bytecode ([MFrame]); its value returns to the invoking frame. *)
-Definition model_frame (top : cframe) (rest : list cframe) (r : list value) (nx : pc) (c : code) (ls : list value)
-           (rt : option jtype) (s' : mstate) : mstep :=
+Definition model_frame_as (fc : string) (top : cframe) (rest : list cframe) (r : list value) (nx : pc) (c : code)
+           (ls : list value) (rt : option jtype) (s' : mstate) : mstep :=
   match init_frame c ls with
   | Some f =>
       let caller := set_frame top (mkframe (f_pc (cf_frame top)) r (f_locals (cf_frame top))) in
-      MNext (with_frames s' ({| cf_class := "<model>"; cf_method := model_method c; cf_code := c; cf_rt := rt;
+      MNext (with_frames s' ({| cf_class := fc; cf_method := model_method c; cf_code := c; cf_rt := rt;
                                 cf_frame := f; cf_resume := None; cf_clinit := false |}
                              :: set_resume caller (Some nx) :: rest))
   | None => MStuck "model frame: locals"
   end.
+
+Definition model_frame := model_frame_as "<model>".
+(** The conversions of a lambda object run in a frame of class "<lambda>": HotSpot runs them in
+    the lambda's hidden class (see [throw_npe]). *)
+Definition lambda_frame := model_frame_as LAMBDA_FRAME.
 
 Definition invoke_run_model (p : program) (mdl : model) (s : mstate) (top : cframe) (rest : list cframe)
            (mr : methodref) (args r : list value) (nx : pc) (cls : string) : mstep :=
@@ -1792,6 +2272,29 @@ Definition concat_code (recipe : list Z) (consts : list (list Z)) (ps : list jty
   | None => None
   end.
 
+(** The adapter of a constructor reference (Foo::new) whose arguments or result need
+    LambdaMetafactory's conversions: new Foo; dup; the converted arguments; invokespecial <init>;
+    the new object converted to the interface method's result (or dropped for void). *)
+Definition lam_ctor_adapter (impl : methodref) (ips : list jtype) (cts sps : list jtype) (srt : option jtype) : option code :=
+  let from := app cts sps in
+  let c := mr_class impl in
+  match lam_args from ips 0 with
+  | Some ld =>
+      let ret := match srt with
+                 | None => Some [Pop; Return None]
+                 | Some b => match lam_conv (TRef c) b with Some cv => Some (app cv [Return (Some (tk_of b))]) | None => None end
+                 end in
+      match ret with
+      | Some rt =>
+          let body := New c :: Dup :: app ld (Invoke InvSpecial impl :: rt) in
+          let nl := fold_left (fun n t => n + match t with TLong | TDouble => 2 | _ => 1 end) from 0 in
+          Some {| c_max_stack := 2 * nl + 8; c_max_locals := nl; c_length := Z.of_nat (length body);
+                  c_instrs := number_instrs body 0; c_handlers := nil |}
+      | None => None
+      end
+  | None => None
+  end.
+
 (** Virtual / interface / special call on the object [ho] found at the receiver.
     [recur] performs a call through a lambda object (with less fuel). *)
 Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref -> list value -> mstep)
@@ -1809,23 +2312,31 @@ Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref 
         let ips' := if (kind =? 6) || (kind =? 8) then ips else TRef (mr_class impl) :: ips in
         let irt' := if kind =? 8 then Some (TRef (mr_class impl)) else irt in
         let adapter :=
-            (* the conversions LambdaMetafactory adds, run as bytecode (not for Foo::new) *)
+            (* the conversions LambdaMetafactory adds, run as bytecode *)
             match parse_mdesc (mr_desc mr) with
             | Some (sps, _) =>
                 let ncap := length cap in
-                match lam_adapter kind impl ips' irt' (firstn ncap ips') sps srt with
-                | Some c => model_frame top rest r nx c (app cap more) srt s
+                match (if kind =? 8 then lam_ctor_adapter impl ips' (firstn ncap ips') sps srt
+                       else lam_adapter kind impl ips' irt' (firstn ncap ips') sps srt) with
+                | Some c => lambda_frame top rest r nx c (app cap more) srt s
                 | None => MStuck "lambda: conversion not modelled"
                 end
             | None => MStuck "lambda: descriptor"
             end in
-        if negb (same_ret_kind irt' srt) then (if kind =? 8 then MStuck "lambda: return value conversion not modelled" else adapter) else
+        if negb (same_ret_kind irt' srt) then adapter else
         match lam_adapt (ms_heap s) ips' (app cap more) with
-        | None => if kind =? 8 then MStuck "lambda: argument conversion not modelled" else adapter
-        | Some None => throw_new p s NPE
+        | None => adapter
+        (* a null to unbox, or a null receiver of the implementation method: the NPE is thrown
+           in the frame of the lambda's hidden class, for which HotSpot computes no message
+           (java_lang_Throwable::get_top_method_and_bci) *)
+        | Some None => throw_msg p s NPE None
         | Some (Some args') =>
         match invoke_kind_of_ref kind with
-        | Some k' => recur s r k' impl args'
+        | Some k' => match k', args' with
+                     | InvStatic, _ => recur s r k' impl args'
+                     | _, VNull :: _ => throw_msg p s NPE None
+                     | _, _ => recur s r k' impl args'
+                     end
         | None =>
           if kind =? 8 then
             (* REF_newInvokeSpecial (Foo::new): invoking the handle initialises
@@ -1851,7 +2362,12 @@ Definition invoke_obj (recur : mstate -> list value -> invoke_kind -> methodref 
       else
         match resolve_full p (lam_primary iface) (mr_name mr) (mr_desc mr) with
         | Some (cn, m) => enter s caller rest cn m args nx
-        | None => MStuck ("method " ++ mr_name mr ++ " on a lambda object is not modelled")
+        | None =>
+            (* Object.equals / Object.hashCode of the lambda's class (it overrides neither) *)
+            if (String.eqb (mr_name mr) "equals" && String.eqb (mr_desc mr) "(Ljava/lang/Object;)Z")
+               || (String.eqb (mr_name mr) "hashCode" && String.eqb (mr_desc mr) "()I") then
+              invoke_run_model p mdl s top rest mr args r nx "java/lang/Object"
+            else MStuck ("method " ++ mr_name mr ++ " on a lambda object is not modelled")
         end
   | _ =>
     let start := match k with
@@ -1962,8 +2478,8 @@ Fixpoint do_invoke (fuel : nat) (p : program) (mdl : model) (s : mstate) (top : 
              (the JDK the code was compiled against) *)
           match resolve_method p (mr_interface mr) (mr_class mr) (mr_name mr) (mr_desc mr) with
           | RThrow e => link_error p s (mr_class mr) e
-          | RFound (_, a, _) => if acc_static a then throw_new p s ICCE else throw_new p s NPE
-          | RUnknown => throw_new p s NPE
+          | RFound (_, a, _) => if acc_static a then throw_new p s ICCE else npe_invoke p s top mr
+          | RUnknown => npe_invoke p s top mr
           end
       | VRef l :: more =>
           let recur s' r' k' impl args' :=
@@ -2078,7 +2594,7 @@ Definition true_units : list Z := [116; 114; 117; 101].
 Definition false_units : list Z := [102; 97; 108; 115; 101].
 
 (** String.valueOf of a component (Objects.toString for references): primitives,
-    null, Strings and the modelled boxes; float/double and other objects (a
+    null, Strings and the modelled boxes (float/double: FloatDec); other objects (a
     toString() call back into bytecode) are not modelled. *)
 Definition component_units (h : heap) (t : jtype) (v : value) : string + list Z :=
   match t, v with
@@ -2099,11 +2615,20 @@ Definition component_units (h : heap) (t : jtype) (v : value) : string + list Z 
                       else inl "record toString: component needs toString() (callback not modelled)"
           | VLong z => if String.eqb c "java/lang/Long" then inr (z_units z)
                        else inl "record toString: component needs toString() (callback not modelled)"
+          | VDouble b => match (if String.eqb c "java/lang/Double" then FloatDec.dtoa b else None) with
+                         | Some u => inr u
+                         | None => inl "record toString: component needs toString() (callback not modelled)"
+                         end
+          | VFloat b => match (if String.eqb c "java/lang/Float" then FloatDec.ftoa b else None) with
+                        | Some u => inr u
+                        | None => inl "record toString: component needs toString() (callback not modelled)"
+                        end
           | _ => inl "record toString: component needs toString() (callback not modelled)"
           end
       | _ => inl "record toString: component needs toString() (callback not modelled)"
       end
-  | (TFloat | TDouble), _ => inl "record toString: float/double component (Float/Double.toString not modelled)"
+  | TDouble, VDouble b => match FloatDec.dtoa b with Some u => inr u | None => inl "record toString: double" end
+  | TFloat, VFloat b => match FloatDec.ftoa b with Some u => inr u | None => inl "record toString: float" end
   | _, _ => inl "record toString: component type"
   end.
 
@@ -2244,6 +2769,75 @@ Definition record_equals (p : program) (h : heap) (rc : string) (gs : list field
     end
   | _ => None
   end.
+
+(** Records whose components need a call back into bytecode (another object's toString,
+    hashCode or equals): the same methods run as bytecode, in ObjectMethods' order.
+    toString: "Name[" then each "c=" with the component appended as String.valueOf does (the
+    constant pieces are locals 1..n+1); hashCode: h = 31 * h + hash(c) in component order
+    (Integer/Long/Float/Double/... hashCode, Objects.hashCode); equals: the same object, then an
+    instance of the record class, then the components from the last to the first (==,
+    Float/Double.compare == 0, Objects.equals), stopping at the first difference. *)
+Definition mk_code (nl : Z) (body : list instr) : code :=
+  {| c_max_stack := 12; c_max_locals := nl; c_length := Z.of_nat (length body);
+     c_instrs := number_instrs body 0; c_handlers := nil |}.
+
+Definition rec_ftype (g : fieldref) : jtype := match field_type (fr_desc g) with Some t => t | None => TRef "java/lang/Object" end.
+
+Definition record_tostring_code (gs : list fieldref) : code :=
+  let n := Z.of_nat (length gs) in
+  let fix comps (gs : list fieldref) (i : Z) : list instr :=
+    match gs with
+    | nil => nil
+    | g :: r => Load KA i :: Invoke InvVirtual (sb_mr "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;")
+                :: Load KA 0 :: Getfield g :: Invoke InvVirtual (sb_mr "append" (append_desc (rec_ftype g)))
+                :: comps r (i + 1)
+    end in
+  mk_code (n + 2)
+    (New "java/lang/StringBuilder" :: Dup :: Invoke InvSpecial (sb_mr "<init>" "()V")
+     :: app (comps gs 1)
+       [Load KA (n + 1); Invoke InvVirtual (sb_mr "append" "(Ljava/lang/String;)Ljava/lang/StringBuilder;");
+        Invoke InvVirtual (sb_mr "toString" "()Ljava/lang/String;"); Return (Some KA)]).
+
+(** The pieces of toString: "Name[c1=", ", c2=", ..., "]" (the first carries the name). *)
+Definition record_tostring_pieces (sn : list Z) (names : list (list Z)) : list (list Z) :=
+  let fix go (ns : list (list Z)) (first : bool) : list (list Z) :=
+    match ns with
+    | nil => [[93]]
+    | n :: r => app (if first then app sn [91] else [44; 32]) (app n [61]) :: go r false
+    end in
+  go names true.
+
+Definition hash_call (t : jtype) : instr :=
+  let m := fun c d => Invoke InvStatic {| mr_class := c; mr_name := "hashCode"; mr_desc := d; mr_interface := false |} in
+  match t with
+  | TInt => m "java/lang/Integer" "(I)I" | TShort => m "java/lang/Short" "(S)I" | TByte => m "java/lang/Byte" "(B)I"
+  | TChar => m "java/lang/Character" "(C)I" | TBool => m "java/lang/Boolean" "(Z)I" | TLong => m "java/lang/Long" "(J)I"
+  | TFloat => m "java/lang/Float" "(F)I" | TDouble => m "java/lang/Double" "(D)I"
+  | _ => m "java/util/Objects" "(Ljava/lang/Object;)I"
+  end.
+
+Definition record_hash_code (gs : list fieldref) : code :=
+  mk_code 1 (Iconst 0 :: app (flat_map (fun g => [Iconst 31; IBin Mul; Load KA 0; Getfield g; hash_call (rec_ftype g); IBin Add]) gs)
+                              [Return (Some KI)]).
+
+Definition eq_test (rc : string) (g : fieldref) (fpc : Z) : list instr :=
+  let get := [Load KA 0; Getfield g; Load KA 1; Checkcast rc; Getfield g] in
+  match rec_ftype g with
+  | TLong => app get [Lcmp; If CNe fpc]
+  | TFloat => app get [Invoke InvStatic {| mr_class := "java/lang/Float"; mr_name := "compare"; mr_desc := "(FF)I"; mr_interface := false |}; If CNe fpc]
+  | TDouble => app get [Invoke InvStatic {| mr_class := "java/lang/Double"; mr_name := "compare"; mr_desc := "(DD)I"; mr_interface := false |}; If CNe fpc]
+  | TRef _ | TArr _ => app get [Invoke InvStatic {| mr_class := "java/util/Objects"; mr_name := "equals"; mr_desc := "(Ljava/lang/Object;Ljava/lang/Object;)Z"; mr_interface := false |}; If CEq fpc]
+  | _ => app get [IfIcmp CNe fpc; Nop]
+  end.
+
+Definition record_equals_code (rc : string) (gs : list fieldref) : code :=
+  let k := Z.of_nat (length gs) in
+  (* 0..5: same object / instance tests; 7 instructions per component; then TRUE (2), FALSE (2) *)
+  let tpc := 6 + 7 * k in
+  let fpc := tpc + 2 in
+  mk_code 2 (app [Load KA 0; Load KA 1; IfAcmp true tpc; Load KA 1; Instanceof rc]
+               (If CEq fpc :: app (flat_map (fun g => eq_test rc g fpc) (rev gs))
+                  [Iconst 1; Return (Some KI); Iconst 0; Return (Some KI)])).
 
 (** ** java.lang.runtime.SwitchBootstraps.typeSwitch / enumSwitch (JDK 21). *)
 Inductive slabel : Type := SLClass (c : string) | SLStr (u : list Z) | SLInt (z : Z) | SLEnum (e : string) (n : string).
@@ -2391,7 +2985,15 @@ Definition indy_other (p : program) (s : mstate) (top : cframe) (rest : list cfr
             match st with
             | VRef o :: r => match record_to_string p (ms_heap s) rcf names gs o with
                              | inr u => let (l, s') := alloc s (OStr u) in go (VRef l :: r) s'
-                             | inl why => MStuck why
+                             | inl why =>
+                                 match simple_name rcf with
+                                 | Some sn =>
+                                     (* a component needs toString(): the same text built by bytecode *)
+                                     let '(ls, s1) := fold_left (fun '(acc, st0) u => let (l, st1) := alloc st0 (OStr u) in (app acc [VRef l], st1))
+                                                        (record_tostring_pieces sn names) (nil, s) in
+                                     model_frame top rest r nx (record_tostring_code gs) (VRef o :: ls) (Some (TRef "java/lang/String")) s1
+                                 | None => MStuck why
+                                 end
                              end
             | VNull :: _ => throw_new p s NPE
             | _ => MStuck "ObjectMethods: operand"
@@ -2400,7 +3002,8 @@ Definition indy_other (p : program) (s : mstate) (top : cframe) (rest : list cfr
             match st with
             | VRef o :: r => match record_hash p (ms_heap s) gs o with
                              | Some z => go (VInt z :: r) s
-                             | None => MStuck "record hashCode: component needs hashCode() (identity hash or callback not modelled)"
+                             | None => (* a component needs hashCode(): bytecode *)
+                                       model_frame top rest r nx (record_hash_code gs) [VRef o] (Some TInt) s
                              end
             | VNull :: _ => throw_new p s NPE
             | _ => MStuck "ObjectMethods: operand"
@@ -2409,7 +3012,8 @@ Definition indy_other (p : program) (s : mstate) (top : cframe) (rest : list cfr
             match st with
             | other :: VRef o :: r => match record_equals p (ms_heap s) rc gs o other with
                                       | Some b => go (VInt (if b then 1 else 0) :: r) s
-                                      | None => MStuck "record equals: component needs equals() (callback not modelled)"
+                                      | None => (* a component needs equals(): bytecode *)
+                                                model_frame top rest r nx (record_equals_code rc gs) [VRef o; other] (Some TBool) s
                                       end
             | _ :: VNull :: _ => throw_new p s NPE
             | _ => MStuck "ObjectMethods: operand"
@@ -2454,13 +3058,16 @@ Definition indy_other (p : program) (s : mstate) (top : cframe) (rest : list cfr
     thrown (NullPointerException) or, when it is not an exception class, the
     step is stuck.  A field of a class the machine does not know is assumed
     to resolve. *)
-Definition instance_field_error (p : program) (s : mstate) (fr : fieldref) (otherwise : string) : mstep :=
+Definition instance_field_error_with (p : program) (s : mstate) (fr : fieldref) (otherwise : string) (npe : mstep) : mstep :=
   match resolve_field p fr with
   | FNotFound => link_error p s (fr_class fr) NSFE
   | FFound _ a => if acc_static a then throw_new p s ICCE
-                  else if String.eqb otherwise NPE then throw_new p s NPE else MStuck otherwise
-  | FUnknown => if String.eqb otherwise NPE then throw_new p s NPE else MStuck otherwise
+                  else if String.eqb otherwise NPE then npe else MStuck otherwise
+  | FUnknown => if String.eqb otherwise NPE then npe else MStuck otherwise
   end.
+
+Definition instance_field_error (p : program) (s : mstate) (fr : fieldref) (otherwise : string) : mstep :=
+  instance_field_error_with p s fr otherwise (throw_new p s NPE).
 
 (** ** One machine step *)
 Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
@@ -2505,7 +3112,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | Getfield fr =>
         match st with
-        | VNull :: _ => instance_field_error p s fr NPE
+        | VNull :: _ => instance_field_error_with p s fr NPE (throw_npe p s top)
         | VRef l :: r =>
             match h l with
             | Some (OObj _ fs) =>
@@ -2523,7 +3130,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | Putfield fr =>
         match st, field_type (fr_desc fr) with
-        | v :: VNull :: _, _ => instance_field_error p s fr NPE
+        | v :: VNull :: _, _ => instance_field_error_with p s fr NPE (throw_npe p s top)
         | v :: VRef l :: r, Some t =>
             if negb (value_fits t v) then MStuck "putfield: value type" else
             match h l with
@@ -2603,7 +3210,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | Arraylength =>
         match st with
-        | VNull :: _ => throw_new p s NPE
+        | VNull :: _ => throw_npe p s top
         | VRef l :: r =>
             match h l with
             | Some (OArr _ es) => go (VInt (Z.of_nat (length es)) :: r) s
@@ -2613,7 +3220,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | ALoadArr k =>
         match st with
-        | VInt _ :: VNull :: _ => throw_new p s NPE
+        | VInt _ :: VNull :: _ => throw_npe p s top
         | VInt idx :: VRef l :: r =>
             match h l with
             | Some (OArr e es) =>
@@ -2626,7 +3233,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | AStoreArr k =>
         match st with
-        | v :: VInt _ :: VNull :: _ => throw_new p s NPE
+        | v :: VInt _ :: VNull :: _ => throw_npe p s top
         | v :: VInt idx :: VRef l :: r =>
             match h l with
             | Some (OArr e es) =>
@@ -2663,7 +3270,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
     (* ---- exceptions ---- *)
     | Athrow =>
         match st with
-        | VNull :: _ => throw_new p s NPE
+        | VNull :: _ => throw_npe p s top
         | VRef l :: _ => throw_obj p s l
         | _ => MStuck "athrow: operand"
         end
@@ -2698,7 +3305,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
     (* ---- monitors (single thread: counts only) ---- *)
     | Monitorenter =>
         match st with
-        | VNull :: _ => throw_new p s NPE
+        | VNull :: _ => throw_npe p s top
         | VRef l :: r =>
             go r {| ms_heap := h; ms_next := ms_next s; ms_statics := ms_statics s;
                     ms_inited := ms_inited s; ms_locks := (l, lock_count (ms_locks s) l + 1) :: ms_locks s;
@@ -2707,7 +3314,7 @@ Definition mstep_of (p : program) (mdl : model) (s : mstate) : mstep :=
         end
     | Monitorexit =>
         match st with
-        | VNull :: _ => throw_new p s NPE
+        | VNull :: _ => throw_npe p s top
         | VRef l :: r =>
             let n := lock_count (ms_locks s) l in
             if n <=? 0 then throw_msg p s "java/lang/IllegalMonitorStateException" (Some (ascii_units "current thread is not owner"))

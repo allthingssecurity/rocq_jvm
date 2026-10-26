@@ -4,9 +4,7 @@
    "V <n>" | "V void" | "E <internal class name>" | "STUCK <why>" | "FUEL". *)
 open Jvm
 
-let rec pos_of_int n =
-  if n = 1 then XH else if n land 1 = 1 then XI (pos_of_int (n lsr 1)) else XO (pos_of_int (n lsr 1))
-let z_of_int n = if n = 0 then Z0 else if n > 0 then Zpos (pos_of_int n) else Zneg (pos_of_int (-n))
+let z_of_int n = Big_int_Z.big_int_of_int n
 let nat_of_int n = let rec go n acc = if n = 0 then acc else go (n - 1) (S acc) in go n O
 
 let () =

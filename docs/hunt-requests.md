@@ -181,3 +181,17 @@ if they fit its conventions.
 | strings | `getBytes`/`new String(byte[], ...)` in UTF-8/ISO-8859-1/US-ASCII/UTF-16*, `Charset`, `new String(char[] / StringBuilder / String)`, `Objects.*` callbacks, `System.arraycopy` messages, `Double`/`Float` boxes | `CharsetOps`, `MiscOps` |
 | soundness fixes | wrong (null) exception messages in the older ArrayList / Collections.emptyList / singletonList / HashMap models | `ListMsgOps` |
 Breaking change for theorem files: `jenv` has a new field `j_seed : Z -> Z` (add `j_seed := fun _ => 0`).
+
+### Model batch 3 (model session, 2026-10-26), unprompted gap closing
+| Area | Now modelled | Evidence (0 mismatches, 300 inputs per method) |
+|---|---|---|
+| JVM | HotSpot's helpful NullPointerException messages (JEP 358, HotSpot's own analysis); record toString/hashCode/equals that call components' methods; constructor references needing conversions | `NpeOps` (with and without `-g`), `RecordOps` |
+| numbers | exact Double/Float toString and parsing (`FloatDec.v`), Math on float/double (`FloatMath.v`), BigInteger/BigDecimal/MathContext, Integer/Long/Short/Byte parse/valueOf/decode/parseUnsigned with every NumberFormatException text | `FloatStrOps`, `MathFOps`, `BigIntOps`, `DecOps`, `CharOps.nums` |
+| text | Formatter e/f/g/a for float/double, BigInteger, BigDecimal; Character properties and full case mapping (incl. ß, İ, surrogates); StringBuilder editing, StringBuffer, the remaining String methods; Locale (getDefault STUCK); URLEncoder/Decoder; UUID; MessageDigest MD5/SHA-1/SHA-2 | `FmtFloatOps`, `CharOps`, `SbOps`, `UrlOps`, `UuidOps`, `DigestOps` |
+| library | all of Arrays (TimSort's compare sequence) and Collections; DoubleStream; LinkedList, EnumMap/EnumSet, IdentityHashMap, WeakHashMap, Hashtable, PriorityQueue, BitSet, ConcurrentSkipListMap/Set; Properties.load; in-memory java.io; Base64, StringTokenizer, CRC32/Adler32, seeded Random; java.net.URI, java.io.File paths; java.time core (fixed-offset zones, ISO and pattern formatting) | `ArraysOps2`, `CollOps2`, `DStreamOps`, `MapOps2`, `IoOps`, `UriOps`, `FileOps`, `TimeOps`, ... (STATUS.md table) |
+
+Notes for theorem files and drivers:
+- The extracted drivers now use zarith (`ocamlfind ... -package zarith`; about 20-30 times faster). `harness/build.sh` builds them.
+- `uenv.u_digit` is also queried with the codes 1000-1003 (general category, property bits, numeric value, upper-case expansion; Strings.v `u_type/u_props/u_numeric/u_upperx`); a hand-written uenv should return the radix-10 digit for 10 and a default (0, or -1 for 1002/1003) for the codes. `harness/work/unicode-21.txt` has 9 columns now (`harness/java/UnicodeTables.java`, run with `--add-opens java.base/java.lang=ALL-UNNAMED`).
+- Proofs that reduce `jdk_model` on symbolic strings with `cbv` became too large with the bigger model: prove the String model's case first (`string_model`), then the dispatch with `cbv -[string_model string_static object_model ...]` (see `CimHash.m_charAt`, `CimCalls.m_eic`), and keep the functions of the goal's right-hand side opaque.
+- `System.getProperty` gives line.separator/file.separator/path.separator ("\n", "/", ":"); other properties, `Locale.getDefault`, the host clock and zone are STUCK.

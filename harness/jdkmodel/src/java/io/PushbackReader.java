@@ -1,0 +1,126 @@
+/*
+ * rocq-jvm model of java.io.PushbackReader (clean-room, Apache-2.0), JDK 21 behaviour and
+ * messages (pushed-back chars first, mark/reset unsupported, skip over the pushed-back chars
+ * first).
+ */
+package java.io;
+
+public class PushbackReader extends FilterReader {
+    private char[] buf;
+    private int pos;
+
+    public PushbackReader(Reader in, int size) {
+        super(in);
+        if (size <= 0) throw new IllegalArgumentException("size <= 0");
+        this.buf = new char[size];
+        this.pos = size;
+    }
+
+    public PushbackReader(Reader in) {
+        this(in, 1);
+    }
+
+    private void checkOpen() throws IOException {
+        if (buf == null) throw new IOException("Stream closed");
+    }
+
+    public int read() throws IOException {
+        synchronized (lock) {
+            checkOpen();
+            if (pos < buf.length) return buf[pos++];
+            return super.read();
+        }
+    }
+
+    public int read(char[] cbuf, int off, int len) throws IOException {
+        synchronized (lock) {
+            checkOpen();
+            if (cbuf == null) throw ModelIo.arrayLengthOfNull("cbuf");
+            ModelIo.checkFromIndexSize(off, len, cbuf.length);
+            if (len == 0) return 0;
+            int avail = buf.length - pos;
+            if (avail > 0) {
+                if (len < avail) avail = len;
+                System.arraycopy(buf, pos, cbuf, off, avail);
+                pos += avail;
+                off += avail;
+                len -= avail;
+            }
+            if (len > 0) {
+                try {
+                    len = super.read(cbuf, off, len);
+                } catch (ArrayIndexOutOfBoundsException e) {
+                    throw new IndexOutOfBoundsException();
+                }
+                if (len == -1) return avail == 0 ? -1 : avail;
+                return avail + len;
+            }
+            return avail;
+        }
+    }
+
+    public void unread(int c) throws IOException {
+        synchronized (lock) {
+            checkOpen();
+            if (pos == 0) throw new IOException("Pushback buffer overflow");
+            buf[--pos] = (char) c;
+        }
+    }
+
+    public void unread(char[] cbuf, int off, int len) throws IOException {
+        synchronized (lock) {
+            checkOpen();
+            if (len > pos) throw new IOException("Pushback buffer overflow");
+            pos -= len;
+            System.arraycopy(cbuf, off, buf, pos, len);
+        }
+    }
+
+    public void unread(char[] cbuf) throws IOException {
+        if (cbuf == null) throw ModelIo.arrayLengthOfNull("cbuf");
+        unread(cbuf, 0, cbuf.length);
+    }
+
+    public boolean ready() throws IOException {
+        synchronized (lock) {
+            checkOpen();
+            return pos < buf.length || super.ready();
+        }
+    }
+
+    public void mark(int readAheadLimit) throws IOException {
+        throw new IOException("mark/reset not supported");
+    }
+
+    public void reset() throws IOException {
+        throw new IOException("mark/reset not supported");
+    }
+
+    public boolean markSupported() {
+        return false;
+    }
+
+    public void close() throws IOException {
+        synchronized (lock) {
+            super.close();
+            buf = null;
+        }
+    }
+
+    public long skip(long n) throws IOException {
+        if (n < 0L) throw new IllegalArgumentException("skip value is negative");
+        synchronized (lock) {
+            checkOpen();
+            int avail = buf.length - pos;
+            if (avail > 0) {
+                if (n <= avail) {
+                    pos += (int) n;
+                    return n;
+                }
+                pos = buf.length;
+                n -= avail;
+            }
+            return avail + super.skip(n);
+        }
+    }
+}

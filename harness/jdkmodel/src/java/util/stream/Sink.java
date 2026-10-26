@@ -8,10 +8,11 @@
 package java.util.stream;
 
 import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
 import java.util.function.LongConsumer;
 
-abstract class Sink implements Consumer<Object>, IntConsumer, LongConsumer {
+abstract class Sink implements Consumer<Object>, IntConsumer, LongConsumer, DoubleConsumer {
     void begin(long size) {
     }
 
@@ -30,6 +31,10 @@ abstract class Sink implements Consumer<Object>, IntConsumer, LongConsumer {
 
     public void accept(long value) {
         accept((Object) Long.valueOf(value));
+    }
+
+    public void accept(double value) {
+        accept((Object) Double.valueOf(value));
     }
 
     /** A stage's sink: begin/end/cancellationRequested go to the downstream sink. */

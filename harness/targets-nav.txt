@@ -1,0 +1,4 @@
+# TreeMap/TreeSet navigable views (NavOps). Run: MODE=machine FUEL=60000000 harness/difftest.sh harness/targets-nav.txt 300 9
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.NavOps fuzz (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.NavOps set (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.NavOps common (I)Ljava/lang/String;

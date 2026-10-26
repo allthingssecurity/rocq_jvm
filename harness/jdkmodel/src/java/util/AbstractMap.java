@@ -124,6 +124,14 @@ public abstract class AbstractMap<K, V> implements Map<K, V> {
         return vs;
     }
 
+    /** JDK: a shallow copy whose key and value views are recreated. */
+    protected Object clone() throws CloneNotSupportedException {
+        AbstractMap<?, ?> result = (AbstractMap<?, ?>) super.clone();
+        result.keySet = null;
+        result.values = null;
+        return result;
+    }
+
     public abstract Set<Entry<K, V>> entrySet();
 
     public boolean equals(Object o) {

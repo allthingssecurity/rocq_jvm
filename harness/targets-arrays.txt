@@ -1,0 +1,3 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ArraysOps arrays (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ArraysOps misc (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.ArraysOps lamd (I)Ljava/lang/String;

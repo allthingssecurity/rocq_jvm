@@ -11,11 +11,8 @@
    An exception's message is printed only when the machine models it. *)
 open Jvm
 
-let rec pos_of_int n =
-  if n = 1 then XH else if n land 1 = 1 then XI (pos_of_int (n lsr 1)) else XO (pos_of_int (n lsr 1))
-let z_of_int n = if n = 0 then Z0 else if n > 0 then Zpos (pos_of_int n) else Zneg (pos_of_int (-n))
-let rec int_of_pos = function XH -> 1 | XO p -> 2 * int_of_pos p | XI p -> 2 * int_of_pos p + 1
-let int_of_z = function Z0 -> 0 | Zpos p -> int_of_pos p | Zneg p -> - (int_of_pos p)
+let z_of_int n = Big_int_Z.big_int_of_int n
+let int_of_z z = Big_int_Z.int_of_big_int z
 let rec int_of_nat = function O -> 0 | S n -> 1 + int_of_nat n
 let nat_of_int n = let rec go n acc = if n = 0 then acc else go (n - 1) (S acc) in go n O
 
@@ -29,19 +26,30 @@ let rec class_files dir =
 let n_cp = 0x110000
 let up = Array.init n_cp (fun i -> i) and lo = Array.init n_cp (fun i -> i)
 let dg = Array.make n_cp (-1) and fl = Array.make n_cp 0
+let ty = Array.make n_cp 0 and pr = Array.make n_cp 0 and nv = Array.make n_cp (-1) and ux = Array.make n_cp (-1)
 let load_tables f =
   In_channel.with_open_text f (fun ic ->
     let rec loop () = match In_channel.input_line ic with
       | None -> ()
       | Some l when String.length l > 0 && l.[0] = '#' -> loop ()
-      | Some l -> Scanf.sscanf l "%d %d %d %d %d" (fun cp u w d f -> up.(cp) <- u; lo.(cp) <- w; dg.(cp) <- d; fl.(cp) <- f); loop ()
+      | Some l ->
+          (try Scanf.sscanf l "%d %d %d %d %d %d %d %d %d" (fun cp u w d f t p n x ->
+                 up.(cp) <- u; lo.(cp) <- w; dg.(cp) <- d; fl.(cp) <- f; ty.(cp) <- t; pr.(cp) <- p; nv.(cp) <- n; ux.(cp) <- x)
+           with Scanf.Scan_failure _ | End_of_file ->
+             Scanf.sscanf l "%d %d %d %d %d" (fun cp u w d f -> up.(cp) <- u; lo.(cp) <- w; dg.(cp) <- d; fl.(cp) <- f));
+          loop ()
     in loop ())
 let inr z = let i = int_of_z z in if i >= 0 && i < n_cp then Some i else None
 let uenv = {
   u_upper = (fun z -> match inr z with Some i -> z_of_int up.(i) | None -> z);
   u_lower = (fun z -> match inr z with Some i -> z_of_int lo.(i) | None -> z);
-  u_digit = (fun z r -> if int_of_z r <> 10 then failwith "digit: only radix 10 tabled"
-                        else match inr z with Some i -> z_of_int dg.(i) | None -> z_of_int (-1));
+  (* radix 10: Character.digit; the codes 1000/1001/1002/1003: getType, the property bits,
+     getNumericValue, the upper case expansion (Strings.v u_type/u_props/u_numeric/u_upperx) *)
+  u_digit = (fun z r -> let r = int_of_z r in
+                        let get a dflt = match inr z with Some i -> z_of_int a.(i) | None -> z_of_int dflt in
+                        if r = 10 then get dg (-1) else if r = 1000 then get ty 0 else if r = 1001 then get pr 0
+                        else if r = 1002 then get nv (-1) else if r = 1003 then get ux (-1)
+                        else failwith "digit: only radix 10 tabled");
   u_is_whitespace = (fun z -> match inr z with Some i -> fl.(i) land 1 <> 0 | None -> false);
   u_is_letter = (fun z -> match inr z with Some i -> fl.(i) land 2 <> 0 | None -> false);
   u_is_digit = (fun z -> match inr z with Some i -> fl.(i) land 4 <> 0 | None -> false);

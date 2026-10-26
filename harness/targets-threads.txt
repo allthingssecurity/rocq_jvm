@@ -16,3 +16,4 @@ classes/thread-tests:classes/threadmodel ThreadTests names (I)Ljava/lang/String;
 classes/thread-tests:classes/threadmodel ThreadTests subclass (I)I
 classes/thread-tests:classes/threadmodel ThreadTests initRace (I)I
 classes/thread-tests:classes/threadmodel ThreadTests sleepYield (I)I
+classes/thread-tests:classes/threadmodel ThreadTests inherit (I)Ljava/lang/String;

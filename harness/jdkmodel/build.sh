@@ -5,6 +5,7 @@
 #           compiled as a patch of java.base (javac --release 17 --patch-module), so the classes
 #           are in package java.util; they are loaded only by the Rocq machine, never by HotSpot.
 # - tests:  harness/jdkmodel/tests/**/*.java      -> classes/jdkmodel-tests/
+#           (NpeOps also without -g -> classes/jdkmodel-tests-nog/)
 #           compiled against the REAL JDK (HotSpot runs them on the real java.util; the machine
 #           runs them with classes/jdkmodel in front).
 # Writes classes/jdkmodel/BUILD-INFO (javac version, sha256 of each class).
@@ -78,6 +79,10 @@ nice javac -J-Xmx512m --release 17 -g -nowarn -Xlint:none --patch-module java.ba
 # javac puts patch-module output under the module name when -d is used with modules
 if [[ -d $out/java.base ]]; then cp -r "$out"/java.base/* "$out"/ && rm -rf "$out"/java.base; fi
 nice javac -J-Xmx512m --release 17 -g -d "$tout" $(find harness/jdkmodel/tests -name '*.java' | sort) 2>&1 | grep -v '^Picked up' || true
+# the helpful-NullPointerException tests also without a LocalVariableTable (HotSpot then names
+# locals <localN> / <parameterN>)
+rm -rf "$tout-nog"; mkdir -p "$tout-nog"
+nice javac -J-Xmx512m --release 17 -d "$tout-nog" harness/jdkmodel/tests/org/rocqjvm/jdkmodel/NpeOps.java 2>&1 | grep -v '^Picked up' || true
 {
   echo "built $(date -u +%Y-%m-%dT%H:%M:%SZ) by harness/jdkmodel/build.sh"
   javac -version 2>&1 | grep -v '^Picked up'

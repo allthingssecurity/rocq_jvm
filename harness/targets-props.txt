@@ -1,0 +1,1 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.PropsOps load (I)Ljava/lang/String;

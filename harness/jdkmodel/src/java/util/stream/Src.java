@@ -118,6 +118,43 @@ abstract class Src {
         }
     }
 
+    static final class DoubleArr extends Src {
+        final double[] a;
+        int index;
+        final int fence;
+
+        DoubleArr(double[] a, int from, int to) {
+            this.a = a;
+            this.index = from;
+            this.fence = to;
+        }
+
+        boolean tryAdvance(Sink c) {
+            if (index >= 0 && index < fence) {
+                c.accept(a[index++]);
+                return true;
+            }
+            return false;
+        }
+
+        void forEachRemaining(Sink c) {
+            int i = index, hi = fence;
+            if (a.length >= hi && i >= 0 && i < (index = hi)) {
+                do {
+                    c.accept(a[i]);
+                } while (++i < hi);
+            }
+        }
+
+        long estimateSize() {
+            return (long) (fence - index);
+        }
+
+        int characteristics() {
+            return SIZED | ORDERED;
+        }
+    }
+
     static final class LongArr extends Src {
         final long[] a;
         int index;
@@ -353,6 +390,68 @@ abstract class Src {
         }
     }
 
+    static final class DoubleIterate extends Src {
+        final double seed;
+        final java.util.function.DoubleUnaryOperator f;
+        final java.util.function.DoublePredicate hasNext; // null: infinite
+        double prev;
+        boolean started, finished;
+
+        DoubleIterate(double seed, java.util.function.DoublePredicate hasNext, java.util.function.DoubleUnaryOperator f) {
+            this.seed = seed;
+            this.f = f;
+            this.hasNext = hasNext;
+        }
+
+        boolean tryAdvance(Sink c) {
+            if (hasNext == null) {
+                double t;
+                if (started) t = f.applyAsDouble(prev);
+                else {
+                    t = seed;
+                    started = true;
+                }
+                c.accept(prev = t);
+                return true;
+            }
+            if (finished) return false;
+            double t;
+            if (started) t = f.applyAsDouble(prev);
+            else {
+                t = seed;
+                started = true;
+            }
+            if (!hasNext.test(t)) {
+                finished = true;
+                return false;
+            }
+            c.accept(prev = t);
+            return true;
+        }
+
+        void forEachRemaining(Sink c) {
+            if (hasNext == null) {
+                super.forEachRemaining(c);
+                return;
+            }
+            if (finished) return;
+            finished = true;
+            double t = started ? f.applyAsDouble(prev) : seed;
+            while (hasNext.test(t)) {
+                c.accept(t);
+                t = f.applyAsDouble(t);
+            }
+        }
+
+        long estimateSize() {
+            return Long.MAX_VALUE;
+        }
+
+        int characteristics() {
+            return ORDERED;
+        }
+    }
+
     static final class LongIterate extends Src {
         final long seed;
         final LongUnaryOperator f;
@@ -420,17 +519,24 @@ abstract class Src {
         final Supplier<?> s;
         final IntSupplier si;
         final LongSupplier sl;
+        final java.util.function.DoubleSupplier sd;
 
         Generate(Supplier<?> s, IntSupplier si, LongSupplier sl) {
+            this(s, si, sl, null);
+        }
+
+        Generate(Supplier<?> s, IntSupplier si, LongSupplier sl, java.util.function.DoubleSupplier sd) {
             this.s = s;
             this.si = si;
             this.sl = sl;
+            this.sd = sd;
         }
 
         boolean tryAdvance(Sink c) {
             if (s != null) c.accept(s.get());
             else if (si != null) c.accept(si.getAsInt());
-            else c.accept(sl.getAsLong());
+            else if (sl != null) c.accept(sl.getAsLong());
+            else c.accept(sd.getAsDouble());
             return true;
         }
 

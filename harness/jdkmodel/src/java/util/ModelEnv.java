@@ -11,4 +11,9 @@ final class ModelEnv {
     }
 
     static native long seed(int which);
+
+    /** The decimal f * 10^e that Double.toString selects for a positive finite v (FloatDec). */
+    static native long decF(double v);
+
+    static native int decE(double v);
 }

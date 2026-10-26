@@ -260,7 +260,16 @@ public final class Collectors {
     }
 
     public static <T> Collector<T, ?, Double> summingDouble(ToDoubleFunction<? super T> mapper) {
-        throw ModelStuckS.unsupported("Collectors.summingDouble");
+        nn(mapper);
+        return new CollectorImpl<T, double[], Double>(() -> new double[3],
+                                                      (a, t) -> { double val = mapper.applyAsDouble(t);
+                                                                  DoublePipe.sumWithCompensation(a, val);
+                                                                  a[2] += val; },
+                                                      (a, b) -> { DoublePipe.sumWithCompensation(a, b[0]);
+                                                                  a[2] += b[2];
+                                                                  DoublePipe.sumWithCompensation(a, -b[1]);
+                                                                  return a; },
+                                                      a -> DoublePipe.computeFinalSum(a), CH_NOID);
     }
 
     public static <T> Collector<T, ?, Double> averagingInt(ToIntFunction<? super T> mapper) {
@@ -280,7 +289,15 @@ public final class Collectors {
     }
 
     public static <T> Collector<T, ?, Double> averagingDouble(ToDoubleFunction<? super T> mapper) {
-        throw ModelStuckS.unsupported("Collectors.averagingDouble");
+        nn(mapper);
+        return new CollectorImpl<T, double[], Double>(() -> new double[4],
+                                                      (a, t) -> { double val = mapper.applyAsDouble(t);
+                                                                  DoublePipe.sumWithCompensation(a, val); a[2]++; a[3] += val; },
+                                                      (a, b) -> { DoublePipe.sumWithCompensation(a, b[0]);
+                                                                  DoublePipe.sumWithCompensation(a, -b[1]);
+                                                                  a[2] += b[2]; a[3] += b[3];
+                                                                  return a; },
+                                                      a -> (a[2] == 0) ? 0.0d : (DoublePipe.computeFinalSum(a) / a[2]), CH_NOID);
     }
 
     public static <T> Collector<T, ?, T> reducing(T identity, BinaryOperator<T> op) {
@@ -478,15 +495,21 @@ public final class Collectors {
     // ---------------------------------------------------------------- statistics
 
     public static <T> Collector<T, ?, IntSummaryStatistics> summarizingInt(ToIntFunction<? super T> mapper) {
-        throw ModelStuckS.unsupported("Collectors.summarizingInt");
+        return new CollectorImpl<T, IntSummaryStatistics, IntSummaryStatistics>(IntSummaryStatistics::new,
+                                                                              (r, t) -> r.accept(mapper.applyAsInt(t)),
+                                                                              (l, r) -> { l.combine(r); return l; }, CH_ID);
     }
 
     public static <T> Collector<T, ?, LongSummaryStatistics> summarizingLong(ToLongFunction<? super T> mapper) {
-        throw ModelStuckS.unsupported("Collectors.summarizingLong");
+        return new CollectorImpl<T, LongSummaryStatistics, LongSummaryStatistics>(LongSummaryStatistics::new,
+                                                                                (r, t) -> r.accept(mapper.applyAsLong(t)),
+                                                                                (l, r) -> { l.combine(r); return l; }, CH_ID);
     }
 
     public static <T> Collector<T, ?, DoubleSummaryStatistics> summarizingDouble(ToDoubleFunction<? super T> mapper) {
-        throw ModelStuckS.unsupported("Collectors.summarizingDouble");
+        return new CollectorImpl<T, DoubleSummaryStatistics, DoubleSummaryStatistics>(DoubleSummaryStatistics::new,
+                                                                                    (r, t) -> r.accept(mapper.applyAsDouble(t)),
+                                                                                    (l, r) -> { l.combine(r); return l; }, CH_ID);
     }
 
     // ---------------------------------------------------------------- teeing

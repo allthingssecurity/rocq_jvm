@@ -1,0 +1,7 @@
+# ConcurrentSkipListMap / ConcurrentSkipListSet model (classes/jdkmodel) vs the real JDK 21, single thread.
+# Build: harness/jdkmodel/build.sh   Run: MODE=machine harness/difftest.sh harness/targets-skip.txt 300 <seed>
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SkipOps map (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SkipOps views (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SkipOps iter (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SkipOps set (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.SkipOps errors (I)Ljava/lang/String;

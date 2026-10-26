@@ -284,7 +284,7 @@ abstract class Pipe {
         };
     }
 
-    /** flatMap: shape 0 = Stream, 1 = IntStream, 2 = LongStream results. */
+    /** flatMap: shape 0 = Stream, 1 = IntStream, 2 = LongStream, 3 = DoubleStream results. */
     static Op flatMapOp(Function<Object, Object> mapper, int shape) {
         return new Op(0, SORTED | DISTINCT | SIZED) {
             Sink wrap(int fl, Sink down) {
@@ -322,7 +322,8 @@ abstract class Pipe {
     static void forEachInto(BaseStream<?, ?> st, int shape, Sink down) {
         if (shape == 0) ((Stream<Object>) st).forEach(down);
         else if (shape == 1) ((IntStream) st).forEach((IntConsumer) down);
-        else ((LongStream) st).forEach((LongConsumer) down);
+        else if (shape == 2) ((LongStream) st).forEach((LongConsumer) down);
+        else ((DoubleStream) st).forEach((java.util.function.DoubleConsumer) down);
     }
 
     /** skip/limit (limit < 0: no limit). */
@@ -698,6 +699,12 @@ abstract class Pipe {
         int[] r = new int[n];
         for (int i = 0; i < n && i < a.length; i++) r[i] = a[i];
         return r;
+    }
+
+    static double[] copyOf(double[] a, int n) {
+        double[] b = new double[n];
+        System.arraycopy(a, 0, b, 0, Math.min(a.length, n));
+        return b;
     }
 
     static long[] copyOf(long[] a, int n) {

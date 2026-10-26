@@ -63,7 +63,7 @@ public interface Stream<T> extends BaseStream<T, Stream<T>> {
     }
 
     default DoubleStream mapMultiToDouble(BiConsumer<? super T, ? super DoubleConsumer> mapper) {
-        throw ModelStuckS.unsupported("Stream.mapMultiToDouble (DoubleStream)");
+        throw ModelStuckS.unsupported("Stream.mapMultiToDouble default method");
     }
 
     Stream<T> distinct();

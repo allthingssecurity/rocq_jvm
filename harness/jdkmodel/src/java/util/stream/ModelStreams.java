@@ -43,6 +43,12 @@ public final class ModelStreams {
         return new LongPipe(new Src.LongArr(array, from, to));
     }
 
+    public static DoubleStream ofDoubleArray(double[] array, int from, int to) {
+        if (array == null) throw new NullPointerException();
+        checkFromToBounds(array.length, from, to);
+        return new DoublePipe(new Src.DoubleArr(array, from, to));
+    }
+
     /** A stream over a collection with the characteristics of its JDK spliterator. mod (may be
      *  null) reads the collection's modification count. */
     public static <T> Stream<T> ofCollection(Collection<T> c, int characteristics, int kind, IntSupplier mod) {

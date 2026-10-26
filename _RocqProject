@@ -2,6 +2,8 @@
 -arg -w -arg -notation-overridden
 theories/Core/Int.v
 theories/Core/Float.v
+theories/Core/FloatDec.v
+theories/Core/FloatMath.v
 theories/Core/Instr.v
 theories/Core/Desc.v
 theories/Core/Semantics.v

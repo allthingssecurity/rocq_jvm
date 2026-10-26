@@ -1,0 +1,5 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.BigIntOps arith (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.BigIntOps bits (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.BigIntOps conv (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.BigIntOps parse (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.BigIntOps modular (I)Ljava/lang/String;

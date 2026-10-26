@@ -1,0 +1,4 @@
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.EnumOps maps (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.EnumOps sets (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.EnumOps enums (I)Ljava/lang/String;
+classes/jdkmodel-tests:classes/jdkmodel org.rocqjvm.jdkmodel.EnumOps valueOfs (I)Ljava/lang/String;
